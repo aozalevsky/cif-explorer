@@ -874,9 +874,26 @@ async function showTip(el) {
 
 /* ------------------------------------------------------------------ setup */
 
+/* UI preferences (theme, panel sizes). The server writes the saved ones
+   into the page and keeps them in ~/.config/cif_explorer/prefs.json, so they
+   are shared by every run (localStorage would not be: it is per port). */
+const prefs = JSON.parse($('#prefs').textContent || '{}');
+function savePref(key, value) {
+  if (value == null) delete prefs[key]; else prefs[key] = value;
+  post('/api/prefs', { [key]: value == null ? null : value }).catch(() => {});
+}
+
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const next = theme === 'dark' ? 'light' : 'dark';
+  const btn = $('#theme');
+  btn.textContent = theme === 'dark' ? '\u2600\uFE0E' : '\u263E\uFE0E';
+  btn.title = `Switch to the ${next} theme`;
+  btn.setAttribute('aria-label', btn.title);
+}
+
 /* Drag `handle` to set the width (or height, with `vertical`) of `panel`.
-   The size is kept in localStorage; double-click the handle to go back to
-   the default from the stylesheet. */
+   Double-click the handle to go back to the default from the stylesheet. */
 function resizable(handle, panel, { key, min, max, size, vertical = false }) {
   const prop = vertical ? 'height' : 'width';
   const cls = vertical ? 'resizing-y' : 'resizing-x';
@@ -884,8 +901,7 @@ function resizable(handle, panel, { key, min, max, size, vertical = false }) {
     panel.style[prop] = Math.round(Math.max(min, Math.min(max(), px))) + 'px';
   };
   const restore = () => {
-    const saved = parseFloat(localStorage.getItem(key));
-    if (saved > 0) apply(saved);
+    if (prefs[key] > 0) apply(prefs[key]);
   };
   restore();
   handle.addEventListener('pointerdown', e => {
@@ -901,7 +917,7 @@ function resizable(handle, panel, { key, min, max, size, vertical = false }) {
       handle.removeEventListener('pointercancel', up);
       handle.classList.remove('dragging');
       document.body.classList.remove(cls);
-      localStorage.setItem(key, parseFloat(panel.style[prop]));
+      savePref(key, parseFloat(panel.style[prop]));
     };
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
@@ -909,7 +925,7 @@ function resizable(handle, panel, { key, min, max, size, vertical = false }) {
   });
   handle.addEventListener('dblclick', () => {
     panel.style[prop] = '';
-    localStorage.removeItem(key);
+    savePref(key, null);
   });
   // a smaller window must not squeeze the table out of view; growing it
   // again brings back the saved size
@@ -942,6 +958,12 @@ function setupUI() {
     saveTrace();
     renderTrace();
   });
+  setTheme(prefs.theme || 'dark');
+  $('#theme').addEventListener('click', () => {
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    setTheme(theme);
+    savePref('theme', theme);
+  });
   $('#issues-close').addEventListener('click', () => toggleIssues(false));
   $('#show-info').addEventListener('change', renderIssues);
   $('#run-validator').addEventListener('click', async () => {
@@ -954,17 +976,17 @@ function setupUI() {
   const sidebar = $('#sidebar'), trace = $('#trace'), issues = $('#issues');
   const MAIN_MIN = 300, SPLITS = 10;
   resizable($('#sidebar-split'), sidebar, {
-    key: 'cifx-sidebar-width', min: 140,
+    key: 'sidebar_width', min: 140,
     max: () => window.innerWidth - trace.offsetWidth - SPLITS - MAIN_MIN,
     size: ev => ev.clientX - sidebar.getBoundingClientRect().left,
   });
   resizable($('#trace-split'), trace, {
-    key: 'cifx-trace-width', min: 280,
+    key: 'trace_width', min: 280,
     max: () => window.innerWidth - sidebar.offsetWidth - SPLITS - MAIN_MIN,
     size: ev => window.innerWidth - ev.clientX,
   });
   resizable($('#issues-split'), issues, {
-    key: 'cifx-issues-height', min: 80, vertical: true,
+    key: 'issues_height', min: 80, vertical: true,
     max: () => window.innerHeight - $('#layout').getBoundingClientRect().top - 120,
     size: ev => window.innerHeight - ev.clientY,
   });

@@ -1,11 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CIF Explorer</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/style.css">
+<script id="prefs" type="application/json">{}</script>
 </head>
 <body>
 <header id="topbar">
@@ -16,6 +17,7 @@
   <form id="searchform" class="search" autocomplete="off">
     <input id="search" type="search" placeholder="Search all values…  ( / )" spellcheck="false">
   </form>
+  <button id="theme" class="btn" type="button"></button>
 </header>
 <div id="banner" class="banner hidden"></div>
 <main id="layout">

@@ -6,6 +6,12 @@ import pytest
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
 
+@pytest.fixture(autouse=True)
+def _private_config(tmp_path, monkeypatch):
+    """Never read or write the real ~/.config/cif_explorer in tests."""
+    monkeypatch.setenv("CIF_EXPLORER_CONFIG", str(tmp_path / "config"))
+
+
 @pytest.fixture(scope="session")
 def mini_dic():
     from cif_explorer.dictionary import DictInfo

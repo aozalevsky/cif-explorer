@@ -13,9 +13,22 @@ from importlib import resources
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
+from . import prefs
 from .explorer import NotFound, Session, Views
 
 STATIC = resources.files("cif_explorer") / "static"
+HTML_TAG = '<html lang="en" data-theme="dark">'
+PREFS_TAG = '<script id="prefs" type="application/json">{}</script>'
+
+
+def render_index(saved: dict) -> bytes:
+    """index.html with the saved preferences filled in, so the page starts
+    in the right theme and panel sizes without a flash."""
+    html = STATIC.joinpath("index.html").read_text(encoding="utf-8")
+    blob = json.dumps(saved).replace("<", "\\u003c")
+    html = html.replace(HTML_TAG, HTML_TAG.replace("dark", saved["theme"]))
+    html = html.replace(PREFS_TAG, PREFS_TAG.replace("{}", blob))
+    return html.encode("utf-8")
 
 
 def _int(params, name, default):
@@ -62,7 +75,9 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype.endswith("javascript"):
             ctype += "; charset=utf-8"
-        self._send(200, res.read_bytes(), ctype)
+        body = (render_index(prefs.load()) if name == "index.html"
+                else res.read_bytes())
+        self._send(200, body, ctype)
 
     # -- routes ---------------------------------------------------------------
     def do_GET(self):
@@ -77,6 +92,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._events()
             if path == "/api/status":
                 return self._json(self.session.status())
+            if path == "/api/prefs":
+                return self._json(prefs.load())
             views = Views(self.session)
             p = lambda n, d="": params.get(n, [d])[0]  # noqa: E731
             if path == "/api/summary":
@@ -128,6 +145,8 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/validate":
                 started = self.session.start_validator()
                 return self._json({"started": started})
+            if url.path == "/api/prefs":
+                return self._json(prefs.update(body))
             if url.path == "/api/reload":
                 threading.Thread(target=self.session.load,
                                  daemon=True).start()

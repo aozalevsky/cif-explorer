@@ -22,16 +22,14 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16181c; --panel: #1d2026; --text: #e3e6ea; --muted: #9aa1ab;
-    --border: #2e333b; --hover: #262a31; --accent: #7aa7ff; --accent-soft: #23314d;
-    --sel: #3a3420; --err: #ff7b7b; --err-soft: #3b2224; --warn: #f0b45a;
-    --warn-soft: #3a2f1c; --info: #8fb8e8; --info-soft: #1f2b3a;
-    --up: #5fd0a4; --down: #c89cf2;
-    --scroll: #434a55; --scroll-hover: #5c6573;
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #16181c; --panel: #1d2026; --text: #e3e6ea; --muted: #9aa1ab;
+  --border: #2e333b; --hover: #262a31; --accent: #7aa7ff; --accent-soft: #23314d;
+  --sel: #3a3420; --err: #ff7b7b; --err-soft: #3b2224; --warn: #f0b45a;
+  --warn-soft: #3a2f1c; --info: #8fb8e8; --info-soft: #1f2b3a;
+  --up: #5fd0a4; --down: #c89cf2;
+  --scroll: #434a55; --scroll-hover: #5c6573;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 
@@ -109,8 +107,8 @@ input { font: inherit; color: inherit; }
 .cat .n { color: var(--muted); font-size: 11px; }
 .cat.unknown .name { color: var(--err); }
 .dot { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; text-align: center; font-family: var(--sans); }
-.dot.err { background: var(--err); color: #fff; }
-.dot.warn { background: var(--warn); color: #fff; }
+.dot.err { background: var(--err); color: var(--panel); }
+.dot.warn { background: var(--warn); color: var(--panel); }
 .dot.info { background: var(--info-soft); color: var(--info); }
 
 #main { flex: 1; min-width: 300px; display: flex; flex-direction: column; min-height: 0; }
@@ -133,6 +131,7 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.small { padding: 0 5px; font-size: 11px; }
+#theme { font-size: 14px; line-height: 1; padding: 3px 7px; }
 .linkbtn { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; }
 .linkbtn:hover { text-decoration: underline; }
 
