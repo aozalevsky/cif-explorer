@@ -10,6 +10,7 @@ fraction of the file size.
 from __future__ import annotations
 
 import gzip
+import io
 import os
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -265,7 +266,8 @@ class _ColumnBuilder:
                                  copy=False)
             return CatColumn(self.uniques, codes)
         if any(p.dtype == object for p in self.parts):
-            self.parts = [p.astype(object) for p in self.parts]
+            self.parts = [p.astype("U").astype(object) if p.dtype.kind == "S"
+                          else p for p in self.parts]
         return DenseColumn(np.concatenate(self.parts))
 
 
@@ -337,7 +339,7 @@ class Table:
 # Reading with python-ihm
 # --------------------------------------------------------------------------
 
-class _CountingReader:
+class _CountingReader(io.RawIOBase):
     """File wrapper that counts bytes consumed (for progress)."""
 
     def __init__(self, fh, total: int, callback: Callable[[float], None]):
@@ -385,21 +387,44 @@ def detect_format(path: str) -> Tuple[str, bool]:
 class _Opened:
     """Context manager that opens (possibly gzipped) input with progress."""
 
-    def __init__(self, path, progress: Callable[[float], None]):
+    def __init__(self, path, progress: Callable[[float], None],
+                 text: bool = False):
         self.path = path
         self.progress = progress
+        self.text = text
+        self._raw = None
+        self._gz = None
+        self._wrap = None
 
     def __enter__(self):
         self._raw = open(self.path, "rb")
-        size = os.fstat(self._raw.fileno()).st_size
-        counted = _CountingReader(self._raw, size, self.progress)
-        _, gz = detect_format(self.path)
-        if gz:
-            return gzip.GzipFile(fileobj=counted, mode="rb")
-        return counted
+        try:
+            size = os.fstat(self._raw.fileno()).st_size
+            magic = self._raw.read(2)
+            self._raw.seek(0)
+            counted = _CountingReader(self._raw, size, self.progress)
+            if magic == b"\x1f\x8b":
+                stream = self._gz = gzip.GzipFile(fileobj=counted, mode="rb")
+            else:
+                stream = io.BufferedReader(counted, buffer_size=65536)
+            if self.text:
+                self._wrap = io.TextIOWrapper(stream, encoding="utf-8",
+                                              errors="replace")
+                return self._wrap
+            return stream
+        except Exception:
+            self._raw.close()
+            raise
 
     def __exit__(self, *exc):
-        self._raw.close()
+        try:
+            if self._wrap is not None:
+                self._wrap.detach()
+            if self._gz is not None:
+                self._gz.close()
+        finally:
+            if self._raw is not None:
+                self._raw.close()
 
 
 class _KeywordFinder:
@@ -533,7 +558,8 @@ def load(path: str, known_categories: Iterable[str] = (),
 
     def discover(cats, stage):
         handlers = {c: _KeywordFinder(c) for c in cats}
-        with _Opened(path, lambda f: progress(stage, f)) as fh:
+        with _Opened(path, lambda f: progress(stage, f),
+                     text=(fmt != "BCIF")) as fh:
             r = _reader(fmt, fh, handlers, ucat, ukey)
             more = r.read_file()
         return more
@@ -564,7 +590,8 @@ def load(path: str, known_categories: Iterable[str] = (),
                                      k.lower()))
         if keys:
             sinks[c] = _RowSink(c, keys)
-    with _Opened(path, lambda f: progress("reading", f)) as fh:
+    with _Opened(path, lambda f: progress("reading", f),
+                 text=(fmt != "BCIF")) as fh:
         r = _reader(fmt, fh, sinks)
         r.read_file()
 

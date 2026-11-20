@@ -125,3 +125,25 @@ def test_bcif(tmp_path):
     assert data["entity"].items == ["type", "id"]
     assert data["entity"].rows(0, 2) == [["polymer", "1"], [".", "2"]]
     assert data["entry"].row(0) == ["X"]
+
+
+def test_dense_mixed_ascii_and_unicode(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "BATCH", 2000)
+    path = tmp_path / "unicode.cif"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("data_U\nloop_\n_atom_site.id\n")
+        for i in range(4500):
+            if i == 3000:
+                fh.write("café_3000\n")
+            else:
+                fh.write("%d\n" % (i + 1))
+    data = store.load(str(path))
+    col = data["atom_site"].columns["id"]
+    assert isinstance(col, DenseColumn)
+    assert col.value(0) == "1" and isinstance(col.value(0), str)
+    assert col.value(3000) == "café_3000"
+    assert col.rows_eq("1").tolist() == [0]
+    assert col.rows_eq("café_3000").tolist() == [3000]
+    uniq, codes = col.factorize()
+    assert len(uniq) == 4500 and uniq[codes[0]] == "1"
+    assert uniq[codes[3000]] == "café_3000"
