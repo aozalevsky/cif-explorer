@@ -83,9 +83,11 @@ function saveHash() {
 
 function saveTrace() {
   const t = state.trace;
-  sessionStorage.setItem('cifx-trace', JSON.stringify({
-    root: t.root, open: [...t.open], closed: [...t.closed], limits: t.limits,
-  }));
+  try {
+    sessionStorage.setItem('cifx-trace', JSON.stringify({
+      root: t.root, open: [...t.open], closed: [...t.closed], limits: t.limits,
+    }));
+  } catch (e) { /* ignore storage errors */ }
 }
 
 function restoreState() {
@@ -95,7 +97,7 @@ function restoreState() {
   t.offset = parseInt(p.get('offset') || '0', 10) || 0;
   t.limit = parseInt(p.get('limit') || '100', 10) || 100;
   t.q = p.get('q') || '';
-  t.filters = p.getAll('f').map(s => {
+  t.filters = p.getAll('f').filter(s => s.includes(':')).map(s => {
     const i = s.indexOf(':');
     return { item: s.slice(0, i), value: s.slice(i + 1) };
   });
@@ -255,7 +257,7 @@ function renderLoading(st) {
 
 async function refreshAll() {
   const st = state.status;
-  if (!st || st.state !== 'ready') return;
+  if (!st || st.state !== 'ready' || st.version === state.version) return;
   const first = state.version === 0;
   state.version = st.version;
   clearCaches();
@@ -439,17 +441,17 @@ function renderTable(page, keepScroll) {
     h('button', { class: 'btn small', disabled: to >= page.total, onclick: () => go(page.offset + page.limit) }, '›'),
     h('button', { class: 'btn small', disabled: to >= page.total, onclick: () => go(Math.floor(last / page.limit) * page.limit) }, '»'),
     limitSel);
-  const toolbar = h('div', { class: 'toolbar' }, filters, q, h('span', { class: 'hint' }, 'double-click a cell to filter by it'), h('span', { class: 'spacer' }), pager);
+  const kv = page.nrows === 1 && page.rows.length === 1 && !t.filters.length && !t.q;
+  const toolbar = h('div', { class: 'toolbar' }, filters, q, kv ? null : h('span', { class: 'hint' }, 'double-click a cell to filter by it'), h('span', { class: 'spacer' }), pager);
 
   let content;
-  const kv = page.nrows === 1 && page.rows.length === 1 && !t.filters.length && !t.q;
   if (kv) {
     const row = page.rows[0];
     content = h('table', { class: 'grid kv' },
       h('tbody', null, page.items.map((it, j) => {
         const v = row.values[j];
         const flag = row.flags[j];
-        return h('tr', { class: row.ref === t.selected ? 'sel' : '', onclick: () => selectRow(page.cat, row.ref) },
+        return h('tr', { class: row.ref === t.selected ? 'sel' : '', dataset: { ref: row.ref }, onclick: () => selectRow(page.cat, row.ref) },
           h('td', { class: 'k' + (it.known ? '' : ' bad'), dataset: { cat: page.cat, item: it.item } }, it.name, it.mandatory ? h('span', { class: 'mand' }, '*') : null),
           h('td', { class: (isNull(v) ? 'null' : '') + (flag ? ' bad' : ''), title: flag ? '⚠ ' + flag : null }, v));
       })));
@@ -584,6 +586,7 @@ async function rowNode({ cat, ref, path, ancestors, summary, rel }) {
 
   const row = await fetchRow(cat, ref);
   if (row.error) {
+    if (isRoot) $('#trace-root-label').textContent = `${cat} · (missing)`;
     node.append(h('div', { class: 'note missing' }, row.error));
     return node;
   }
@@ -754,9 +757,12 @@ async function renderIssues() {
     ? `${counts.error || 0} errors · ${counts.warning || 0} warnings · ${counts.info || 0} info`
     : 'checks running…';
   const icon = { error: '✗', warning: '⚠', info: 'ℹ' };
+  const present = new Set((state.summary ? state.summary.categories : []).map(c => c.name));
   const rows = list.map(i => {
     const where = i.category + (i.items.length ? '.' + i.items.join(', ') : '');
+    const exists = present.has(i.category);
     const jump = (k) => {
+      if (!exists) return;
       const ref = (i.refs || [])[k];
       if (ref == null) return openCategory(i.category);
       openCategory(i.category, { around: i.rows[k], selected: ref }).then(() => selectRow(i.category, ref));
@@ -765,7 +771,7 @@ async function renderIssues() {
       h('a', { onclick: () => jump(k), title: 'show this row' }, 'row ' + (i.rows[k] + 1)));
     return h('div', { class: 'issue' },
       h('span', { class: 'sev ' + i.severity }, icon[i.severity] || '•'),
-      h('span', { class: 'where', title: where, onclick: () => jump(0) }, where),
+      h('span', { class: 'where' + (exists ? '' : ' muted'), title: where, onclick: exists ? () => jump(0) : null }, where),
       h('div', null,
         h('div', null, i.message, i.count ? h('span', { class: 'muted' }, ` · ${fmt(i.count)} row${i.count > 1 ? 's' : ''}`) : null),
         i.values && i.values.length ? h('div', { class: 'vals' }, 'values: ' + i.values.slice(0, 8).join(' | ') + (i.values.length > 8 ? ' …' : '')) : null,
@@ -773,24 +779,31 @@ async function renderIssues() {
   });
   if (data.ready && !list.length) rows.push(h('div', { class: 'empty-state' }, 'No problems found by the live checks.'));
   const v = data.validator || {};
+  const vmsgs = v.messages || [];
+  const vcount = vmsgs.length
+    ? `${fmt(vmsgs.length)}${v.truncated ? '+' : ''} problem(s)` + (v.truncated ? ' (truncated)' : '')
+    : 'no problems';
   const vbox = h('div', { class: 'validator' },
     h('b', null, 'python-ihm validator '),
     h('span', { class: 'muted' }, v.state === 'idle' ? '(not run; checks the whole file with Dictionary.validate)'
       : v.state === 'running' ? 'running…'
-        : `${(v.messages || []).length ? (v.messages || []).length + ' problem(s)' : 'no problems'} · ${v.seconds} s` + (v.version !== state.version ? ' · ran on an earlier version of the file' : '')),
-    (v.messages || []).length ? h('pre', null, v.messages.join('\n\n')) : null);
+        : `${vcount} · ${v.seconds} s` + (v.version !== state.version ? ' · ran on an earlier version of the file' : '')),
+    vmsgs.length ? h('pre', null, vmsgs.join('\n\n')) : null);
   $('#run-validator').disabled = v.state === 'running';
   body.replaceChildren(...rows, vbox);
 }
 
 /* ----------------------------------------------------------------- search */
 
+let searchToken = 0;
 async function runSearch(q) {
   const pop = $('#searchresults');
+  const tok = ++searchToken;
   if (!q) { pop.classList.add('hidden'); return; }
   pop.classList.remove('hidden');
   pop.replaceChildren(h('div', { class: 'empty-state' }, 'Searching…'));
   const res = await api('/api/search', { q }).catch(e => ({ error: e.message }));
+  if (tok !== searchToken) return;
   if (res.error) { pop.replaceChildren(h('div', { class: 'empty-state' }, res.error)); return; }
   if (!res.results.length) { pop.replaceChildren(h('div', { class: 'empty-state' }, `No value contains “${q}”.`)); return; }
   const out = [];
@@ -848,16 +861,16 @@ async function showTip(el) {
     const vals = info.enum.slice(0, 20).map(e => e.value).join(' | ');
     kids.push(h('div', { class: 'tt-enum' }, 'allowed: ' + vals + (info.enum_total > 20 ? ` … (${info.enum_total})` : '')));
   }
-  const list = (xs, present) => {
+  const inFile = new Set((state.summary ? state.summary.categories : []).map(c => c.name));
+  const list = xs => {
     // categories in this file first, then the rest, capped
-    const inFile = new Set((state.summary ? state.summary.categories : []).map(c => c.name));
     const sorted = [...xs].sort((a, b) => (inFile.has(b) - inFile.has(a)) || a.localeCompare(b));
     const shown = sorted.slice(0, 10).map(c => (inFile.has(c) ? c : c + '°'));
     return shown.join(', ') + (sorted.length > 10 ? ` … (+${sorted.length - 10})` : '');
   };
   if ((info.parents || []).length) kids.push(h('div', { class: 'tt-meta' }, '↑ refers to: ' + list(info.parents)));
   if ((info.children || []).length) kids.push(h('div', { class: 'tt-meta' }, '↓ referenced by: ' + list(info.children)));
-  if ([...(info.parents || []), ...(info.children || [])].some(c => !(state.summary.categories.some(x => x.name === c)))) {
+  if ([...(info.parents || []), ...(info.children || [])].some(c => !inFile.has(c))) {
     kids.push(h('div', { class: 'tt-meta small' }, '° not in this file'));
   }
   tip.replaceChildren(...kids);
@@ -902,21 +915,21 @@ function resizable(handle, panel, { key, min, max, size, vertical = false }) {
   const restore = () => {
     if (prefs[key] > 0) apply(prefs[key]);
   };
-  restore();
   handle.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     e.preventDefault();
     handle.setPointerCapture(e.pointerId);
     handle.classList.add('dragging');
     document.body.classList.add(cls);
-    const move = ev => apply(size(ev));
+    let moved = false;
+    const move = ev => { moved = true; apply(size(ev)); };
     const up = () => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', up);
       handle.classList.remove('dragging');
       document.body.classList.remove(cls);
-      savePref(key, parseFloat(panel.style[prop]));
+      if (moved) savePref(key, parseFloat(panel.style[prop]));
     };
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
@@ -929,20 +942,27 @@ function resizable(handle, panel, { key, min, max, size, vertical = false }) {
   // a smaller window must not squeeze the table out of view; growing it
   // again brings back the saved size
   window.addEventListener('resize', restore);
+  return restore;
 }
 
 function setupUI() {
   $('#catfilter').addEventListener('input', renderSidebar);
   $('#searchform').addEventListener('submit', e => { e.preventDefault(); runSearch($('#search').value.trim()); });
-  $('#search').addEventListener('search', () => { if (!$('#search').value) $('#searchresults').classList.add('hidden'); });
+  $('#search').addEventListener('search', () => {
+    if (!$('#search').value) { searchToken++; $('#searchresults').classList.add('hidden'); }
+  });
   document.addEventListener('click', e => {
-    if (!e.target.closest('#searchresults') && !e.target.closest('#searchform')) $('#searchresults').classList.add('hidden');
+    if (!e.target.closest('#searchresults') && !e.target.closest('#searchform')) {
+      searchToken++;
+      $('#searchresults').classList.add('hidden');
+    }
   });
   document.addEventListener('keydown', e => {
     if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
       e.preventDefault();
       $('#search').focus();
     } else if (e.key === 'Escape') {
+      searchToken++;
       $('#searchresults').classList.add('hidden');
       $('#tooltip').classList.add('hidden');
     }
@@ -974,21 +994,28 @@ function setupUI() {
   // resizable panels; the table in the middle always keeps MAIN_MIN pixels
   const sidebar = $('#sidebar'), trace = $('#trace'), issues = $('#issues');
   const MAIN_MIN = 300, SPLITS = 10;
-  resizable($('#sidebar-split'), sidebar, {
-    key: 'sidebar_width', min: 140,
-    max: () => window.innerWidth - trace.offsetWidth - SPLITS - MAIN_MIN,
-    size: ev => ev.clientX - sidebar.getBoundingClientRect().left,
-  });
-  resizable($('#trace-split'), trace, {
-    key: 'trace_width', min: 280,
-    max: () => window.innerWidth - sidebar.offsetWidth - SPLITS - MAIN_MIN,
-    size: ev => window.innerWidth - ev.clientX,
-  });
-  resizable($('#issues-split'), issues, {
-    key: 'issues_height', min: 80, vertical: true,
-    max: () => window.innerHeight - $('#layout').getBoundingClientRect().top - 120,
-    size: ev => window.innerHeight - ev.clientY,
-  });
+  // apply raw saved widths before clamping so sidebar isn't clamped against
+  // trace's CSS default before trace's saved width is applied
+  if (prefs.sidebar_width > 0) sidebar.style.width = Math.round(prefs.sidebar_width) + 'px';
+  if (prefs.trace_width > 0) trace.style.width = Math.round(prefs.trace_width) + 'px';
+  const restores = [
+    resizable($('#sidebar-split'), sidebar, {
+      key: 'sidebar_width', min: 140,
+      max: () => window.innerWidth - trace.offsetWidth - SPLITS - MAIN_MIN,
+      size: ev => ev.clientX - sidebar.getBoundingClientRect().left,
+    }),
+    resizable($('#trace-split'), trace, {
+      key: 'trace_width', min: 280,
+      max: () => window.innerWidth - sidebar.offsetWidth - SPLITS - MAIN_MIN,
+      size: ev => window.innerWidth - ev.clientX,
+    }),
+    resizable($('#issues-split'), issues, {
+      key: 'issues_height', min: 80, vertical: true,
+      max: () => window.innerHeight - $('#layout').getBoundingClientRect().top - 120,
+      size: ev => window.innerHeight - ev.clientY,
+    }),
+  ];
+  restores.forEach(fn => fn());
   if (state.issuesOpen) $('#issues').classList.remove('hidden');
 }
 
