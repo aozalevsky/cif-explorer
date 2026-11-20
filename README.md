@@ -102,6 +102,16 @@ pytest
 All CIF parsing is delegated to [python-ihm](https://github.com/ihmwg/python-ihm);
 this package contains no tokenizer of its own.
 
+### Releasing
+
+1. Set `__version__` in `src/cif_explorer/__init__.py` (e.g. `0.2.0`) and
+   commit.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The [workflow](.github/workflows/workflow.yml) runs the tests, builds the
+sdist and wheel, checks that the tag matches the version and publishes to
+PyPI through trusted publishing (GitHub environment `pypi`).
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

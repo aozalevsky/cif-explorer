@@ -1,0 +1,79 @@
+# Tests and build on every push and pull request.
+# Pushing a tag vX.Y.Z publishes that version to PyPI through trusted
+# publishing (no token): PyPI trusts this file, workflow.yml, in the
+# GitHub environment "pypi".
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (Python ${{ matrix.python }}, ${{ matrix.deps }} deps)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        deps: [latest]
+        include:
+          # the oldest versions pyproject.toml allows (ihm 2.1, numpy 1.22)
+          - python: "3.10"
+            deps: oldest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v10
+      - name: Install
+        run: >-
+          uv pip install --system -e ".[test]"
+          ${{ matrix.deps == 'oldest' && '--resolution lowest-direct' || '' }}
+      - name: Test
+        run: python -m pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check metadata
+        run: uvx twine check --strict dist/*
+      - name: Check that the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/cif_explorer-${version}.tar.gz" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match the package version:" dist/*
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cif-explorer
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
