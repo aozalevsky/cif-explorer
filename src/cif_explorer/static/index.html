@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CIF Explorer</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">CIF&nbsp;Explorer</div>
+  <div id="fileinfo" class="fileinfo"></div>
+  <div class="spacer"></div>
+  <div id="chips" class="chips"></div>
+  <form id="searchform" class="search" autocomplete="off">
+    <input id="search" type="search" placeholder="Search all values…  ( / )" spellcheck="false">
+  </form>
+</header>
+<div id="banner" class="banner hidden"></div>
+<main id="layout">
+  <nav id="sidebar">
+    <input id="catfilter" type="search" placeholder="Filter categories" spellcheck="false">
+    <div id="catlist"></div>
+  </nav>
+  <section id="main">
+    <div id="tableview" class="empty-state">Pick a category on the left.</div>
+  </section>
+  <div id="splitter" title="Drag to resize"></div>
+  <aside id="trace">
+    <div class="panel-head">
+      <span class="panel-title">Trace</span>
+      <span id="trace-root-label" class="muted"></span>
+      <div class="spacer"></div>
+      <button id="trace-up" class="btn" title="Expand all ancestors of the root row">↑ all parents</button>
+      <button id="trace-collapse" class="btn" title="Collapse everything">collapse</button>
+    </div>
+    <div id="trace-body" class="empty-state">Click a table row to trace it up and down the hierarchy.</div>
+  </aside>
+</main>
+<section id="issues" class="drawer hidden">
+  <div class="panel-head">
+    <span class="panel-title">Dictionary checks</span>
+    <span id="issues-summary" class="muted"></span>
+    <div class="spacer"></div>
+    <label class="muted small"><input type="checkbox" id="show-info"> show info</label>
+    <button id="run-validator" class="btn" title="Run python-ihm's Dictionary.validate on the whole file">Run python-ihm validator</button>
+    <button id="issues-close" class="btn">×</button>
+  </div>
+  <div id="issues-body"></div>
+</section>
+<div id="searchresults" class="popover hidden"></div>
+<div id="tooltip" class="tooltip hidden"></div>
+<div id="loading" class="loading hidden">
+  <div class="loading-box">
+    <div id="loading-title">Loading…</div>
+    <div class="bar"><div id="loading-bar"></div></div>
+    <div id="loading-stage" class="muted small"></div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

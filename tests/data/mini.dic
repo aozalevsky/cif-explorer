@@ -1,0 +1,560 @@
+data_mini.dic
+
+_datablock.id mini.dic
+_dictionary.title mini.dic
+_dictionary.version 0.1
+
+save_entry
+    _category.description
+;              Entry.
+;
+    _category.id entry
+    _category.mandatory_code yes
+    _category_key.name '_entry.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_entity
+    _category.description
+;              Entities in the
+               structure.
+;
+    _category.id entity
+    _category.mandatory_code yes
+    _category_key.name '_entity.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_chem_comp
+    _category.description
+;              Chemical components.
+;
+    _category.id chem_comp
+    _category.mandatory_code no
+    _category_key.name '_chem_comp.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_entity_poly_seq
+    _category.description
+;              Polymer sequence.
+;
+    _category.id entity_poly_seq
+    _category.mandatory_code no
+    loop_
+    _category_key.name
+    '_entity_poly_seq.entity_id'
+    '_entity_poly_seq.num'
+    '_entity_poly_seq.mon_id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_struct_asym
+    _category.description
+;              Instances of entities.
+;
+    _category.id struct_asym
+    _category.mandatory_code no
+    _category_key.name '_struct_asym.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_atom_site
+    _category.description
+;              Atoms.
+;
+    _category.id atom_site
+    _category.mandatory_code no
+    _category_key.name '_atom_site.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_seg
+    _category.description
+;              Segments with a begin and an end residue.
+;
+    _category.id seg
+    _category.mandatory_code no
+    _category_key.name '_seg.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save_xl
+    _category.description
+;              Pairs of residues (cross-link like).
+;
+    _category.id xl
+    _category.mandatory_code no
+    _category_key.name '_xl.id'
+    loop_
+    _category_group.id
+    inclusive_group
+    mini_group
+save_
+
+save__entry.id
+    _item_description.description
+;              The id of entry.
+               Second line.
+;
+    _item.name '_entry.id'
+    _item.category_id entry
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__entity.id
+    _item_description.description
+;              The id of entity.
+               Second line.
+;
+    _item.name '_entity.id'
+    _item.category_id entity
+    _item.mandatory_code yes
+    _item_type.code code
+    loop_
+    _item_linked.child_name
+    _item_linked.parent_name
+    '_entity_poly_seq.entity_id' '_entity.id'
+    '_struct_asym.entity_id' '_entity.id'
+    '_atom_site.label_entity_id' '_entity.id'
+    '_seg.entity_id' '_entity.id'
+    '_xl.entity_id_1' '_entity.id'
+    '_xl.entity_id_2' '_entity.id'
+save_
+
+save__entity.type
+    _item_description.description
+;              The type of entity.
+               Second line.
+;
+    _item.name '_entity.type'
+    _item.category_id entity
+    _item.mandatory_code no
+    _item_type.code line
+    loop_
+    _item_enumeration.value
+    _item_enumeration.detail
+    polymer 'about polymer'
+    non-polymer 'about non-polymer'
+    water 'about water'
+save_
+
+save__entity.pdbx_description
+    _item_description.description
+;              The pdbx_description of entity.
+               Second line.
+;
+    _item.name '_entity.pdbx_description'
+    _item.category_id entity
+    _item.mandatory_code no
+    _item_type.code line
+save_
+
+save__chem_comp.id
+    _item_description.description
+;              The id of chem_comp.
+               Second line.
+;
+    _item.name '_chem_comp.id'
+    _item.category_id chem_comp
+    _item.mandatory_code yes
+    _item_type.code ucode
+    loop_
+    _item_linked.child_name
+    _item_linked.parent_name
+    '_entity_poly_seq.mon_id' '_chem_comp.id'
+    '_atom_site.label_comp_id' '_chem_comp.id'
+    '_seg.comp_id_begin' '_chem_comp.id'
+    '_seg.comp_id_end' '_chem_comp.id'
+    '_xl.comp_id_1' '_chem_comp.id'
+    '_xl.comp_id_2' '_chem_comp.id'
+save_
+
+save__chem_comp.name
+    _item_description.description
+;              The name of chem_comp.
+               Second line.
+;
+    _item.name '_chem_comp.name'
+    _item.category_id chem_comp
+    _item.mandatory_code no
+    _item_type.code text
+save_
+
+save__entity_poly_seq.entity_id
+    _item_description.description
+;              The entity_id of entity_poly_seq.
+               Second line.
+;
+    _item.name '_entity_poly_seq.entity_id'
+    _item.category_id entity_poly_seq
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__entity_poly_seq.num
+    _item_description.description
+;              The num of entity_poly_seq.
+               Second line.
+;
+    _item.name '_entity_poly_seq.num'
+    _item.category_id entity_poly_seq
+    _item.mandatory_code yes
+    _item_type.code int
+    loop_
+    _item_range.minimum
+    _item_range.maximum
+    1 .
+    1 1
+    loop_
+    _item_linked.child_name
+    _item_linked.parent_name
+    '_atom_site.label_seq_id' '_entity_poly_seq.num'
+    '_seg.seq_id_begin' '_entity_poly_seq.num'
+    '_seg.seq_id_end' '_entity_poly_seq.num'
+    '_xl.seq_id_1' '_entity_poly_seq.num'
+    '_xl.seq_id_2' '_entity_poly_seq.num'
+save_
+
+save__entity_poly_seq.mon_id
+    _item_description.description
+;              The mon_id of entity_poly_seq.
+               Second line.
+;
+    _item.name '_entity_poly_seq.mon_id'
+    _item.category_id entity_poly_seq
+    _item.mandatory_code yes
+    _item_type.code ucode
+save_
+
+save__struct_asym.id
+    _item_description.description
+;              The id of struct_asym.
+               Second line.
+;
+    _item.name '_struct_asym.id'
+    _item.category_id struct_asym
+    _item.mandatory_code yes
+    _item_type.code code
+    loop_
+    _item_linked.child_name
+    _item_linked.parent_name
+    '_atom_site.label_asym_id' '_struct_asym.id'
+save_
+
+save__struct_asym.entity_id
+    _item_description.description
+;              The entity_id of struct_asym.
+               Second line.
+;
+    _item.name '_struct_asym.entity_id'
+    _item.category_id struct_asym
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__struct_asym.details
+    _item_description.description
+;              The details of struct_asym.
+               Second line.
+;
+    _item.name '_struct_asym.details'
+    _item.category_id struct_asym
+    _item.mandatory_code no
+    _item_type.code text
+save_
+
+save__atom_site.id
+    _item_description.description
+;              The id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.id'
+    _item.category_id atom_site
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__atom_site.label_atom_id
+    _item_description.description
+;              The label_atom_id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.label_atom_id'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code code
+save_
+
+save__atom_site.label_comp_id
+    _item_description.description
+;              The label_comp_id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.label_comp_id'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code ucode
+save_
+
+save__atom_site.label_seq_id
+    _item_description.description
+;              The label_seq_id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.label_seq_id'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code int
+save_
+
+save__atom_site.label_asym_id
+    _item_description.description
+;              The label_asym_id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.label_asym_id'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code code
+save_
+
+save__atom_site.label_entity_id
+    _item_description.description
+;              The label_entity_id of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.label_entity_id'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code code
+save_
+
+save__atom_site.Cartn_x
+    _item_description.description
+;              The Cartn_x of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.Cartn_x'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code float
+    _item_units.code angstroms
+save_
+
+save__atom_site.occupancy
+    _item_description.description
+;              The occupancy of atom_site.
+               Second line.
+;
+    _item.name '_atom_site.occupancy'
+    _item.category_id atom_site
+    _item.mandatory_code no
+    _item_type.code float
+    loop_
+    _item_range.minimum
+    _item_range.maximum
+    0.0 0.0
+    0.0 1.0
+    1.0 1.0
+save_
+
+save__seg.id
+    _item_description.description
+;              The id of seg.
+               Second line.
+;
+    _item.name '_seg.id'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__seg.entity_id
+    _item_description.description
+;              The entity_id of seg.
+               Second line.
+;
+    _item.name '_seg.entity_id'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__seg.seq_id_begin
+    _item_description.description
+;              The seq_id_begin of seg.
+               Second line.
+;
+    _item.name '_seg.seq_id_begin'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code int
+save_
+
+save__seg.seq_id_end
+    _item_description.description
+;              The seq_id_end of seg.
+               Second line.
+;
+    _item.name '_seg.seq_id_end'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code int
+save_
+
+save__seg.comp_id_begin
+    _item_description.description
+;              The comp_id_begin of seg.
+               Second line.
+;
+    _item.name '_seg.comp_id_begin'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code ucode
+save_
+
+save__seg.comp_id_end
+    _item_description.description
+;              The comp_id_end of seg.
+               Second line.
+;
+    _item.name '_seg.comp_id_end'
+    _item.category_id seg
+    _item.mandatory_code yes
+    _item_type.code ucode
+save_
+
+save__xl.id
+    _item_description.description
+;              The id of xl.
+               Second line.
+;
+    _item.name '_xl.id'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code int
+save_
+
+save__xl.entity_id_1
+    _item_description.description
+;              The entity_id_1 of xl.
+               Second line.
+;
+    _item.name '_xl.entity_id_1'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__xl.entity_id_2
+    _item_description.description
+;              The entity_id_2 of xl.
+               Second line.
+;
+    _item.name '_xl.entity_id_2'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code code
+save_
+
+save__xl.seq_id_1
+    _item_description.description
+;              The seq_id_1 of xl.
+               Second line.
+;
+    _item.name '_xl.seq_id_1'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code int
+save_
+
+save__xl.seq_id_2
+    _item_description.description
+;              The seq_id_2 of xl.
+               Second line.
+;
+    _item.name '_xl.seq_id_2'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code int
+save_
+
+save__xl.comp_id_1
+    _item_description.description
+;              The comp_id_1 of xl.
+               Second line.
+;
+    _item.name '_xl.comp_id_1'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code ucode
+save_
+
+save__xl.comp_id_2
+    _item_description.description
+;              The comp_id_2 of xl.
+               Second line.
+;
+    _item.name '_xl.comp_id_2'
+    _item.category_id xl
+    _item.mandatory_code yes
+    _item_type.code ucode
+save_
+
+loop_
+_item_type_list.code
+_item_type_list.primitive_code
+_item_type_list.construct
+_item_type_list.detail
+code                      char   
+;[][_,.;:"&<>()/\{}'`~!@#$%A-Za-z0-9*|+-]*
+;
+  "              code item types/single words ..."  
+ucode                     uchar  
+;[][_,.;:"&<>()/\{}'`~!@#$%A-Za-z0-9*|+-]*
+;
+  "              code item types/single words  (case insensitive) ..."  
+line                      char   
+;[][ \t_(),.;:"&<>/\{}'`~!@#$%?+=*A-Za-z0-9|^-]*
+;
+  "              char item types / multi-word items ..."  
+uline                     uchar  
+;[][ \t_(),.;:"&<>/\{}'`~!@#$%?+=*A-Za-z0-9|^-]*
+;
+  "              char item types / multi-word items (case insensitive)..."  
+text                      char   
+;[][ \n\t()_,.;:"&<>/\{}'`~!@#$%?+=*A-Za-z0-9|^-]*
+;
+  "              text item types / multi-line text ..."  
+int                       numb   "[+-]?[0-9]+"  
+;              int item types are the subset of numbers that are the negative
+               or positive integers.
+;
+  
+float                     numb   -?(([0-9]+)[.]?|([0-9]*[.][0-9]+))([(][0-9]+[)])?([eE][+-]?[0-9]+)?  
+;              float item types are the subset of numbers that are the floating
+               numbers.
+;
