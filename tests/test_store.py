@@ -101,3 +101,27 @@ def test_parse_error(tmp_path):
     path.write_text("data_X\n_entry.id\n;unterminated\n")
     with pytest.raises(ihm.format.CifParserError):
         store.load(str(path))
+
+
+def test_bcif(tmp_path):
+    import ihm.format_bcif
+    path = tmp_path / "x.bcif"
+    with open(path, "wb") as fh:
+        w = ihm.format_bcif.BinaryCifWriter(fh)
+        w.start_block("X")
+        with w.loop("_entity", ["id", "type"]) as lp:
+            lp.write(id="1", type="polymer")
+            lp.write(id="2", type=None)
+        with w.category("_entry") as c:
+            c.write(id="X")
+        w.flush()
+    data = store.load(str(path))
+    assert data.format == "BCIF"
+    ent = data["entity"]
+    # no line numbers in BinaryCIF: without a dictionary, alphabetical
+    assert ent.items == ["id", "type"] and ent.line is None
+    assert ent.rows(0, 2) == [["1", "polymer"], ["2", "."]]
+    data = store.load(str(path), keyword_order=lambda c: ["type", "id"])
+    assert data["entity"].items == ["type", "id"]
+    assert data["entity"].rows(0, 2) == [["polymer", "1"], [".", "2"]]
+    assert data["entry"].row(0) == ["X"]

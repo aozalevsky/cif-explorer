@@ -178,7 +178,8 @@ class Session:
                 # until it changes again
                 self.loaded_stat = stat_key
                 cats = self.dic.categories.keys() if self.dic else ()
-                data = store.load(self.path, cats, progress=self._progress)
+                data = store.load(self.path, cats, progress=self._progress,
+                                  keyword_order=self._keyword_order)
             except Exception as exc:  # parse errors, I/O errors
                 if self.loaded_stat is None:
                     self.loaded_stat = (0.0, -1)
@@ -202,6 +203,12 @@ class Session:
                             "status": self.status()})
             self.run_checks()
             return True
+
+    def _keyword_order(self, cat: str) -> List[str]:
+        if self.dic is None or self.dic.ihm is None:
+            return []
+        c = self.dic.ihm.categories.get(cat)
+        return list(c.keywords) if c else []
 
     def run_checks(self) -> None:
         data, version, checker = self.data, self.version, self.checker

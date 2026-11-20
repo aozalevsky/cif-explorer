@@ -501,11 +501,15 @@ def _reader(fmt: str, fh, handlers, ucat=None, ukey=None):
 
 
 def load(path: str, known_categories: Iterable[str] = (),
-         progress: ProgressFn = _noop_progress) -> CifData:
+         progress: ProgressFn = _noop_progress,
+         keyword_order: Optional[Callable[[str], Sequence[str]]] = None
+         ) -> CifData:
     """Read the first data block of ``path`` with python-ihm.
 
     ``known_categories`` (names without leading underscore, e.g. from the
     dictionary) lets keyword discovery happen in a single pass.
+    ``keyword_order(category)`` gives the dictionary order of keywords; it is
+    used for BinaryCIF, where python-ihm reports no line numbers.
     """
     t0 = time.time()
     data = CifData(path)
@@ -519,12 +523,13 @@ def load(path: str, known_categories: Iterable[str] = (),
 
     def ukey(cat, key, line):
         cat = cat.lower()
+        line = line or None          # BinaryCIF reports 0
         keywords.setdefault(cat, {}).setdefault(key, line)
         if cat not in cat_lines:
             cat_lines[cat] = line
 
     def ucat(cat, line):
-        unknown_cats.setdefault(cat.lower(), line)
+        unknown_cats.setdefault(cat.lower(), line or None)
 
     def discover(cats, stage):
         handlers = {c: _KeywordFinder(c) for c in cats}
@@ -550,6 +555,13 @@ def load(path: str, known_categories: Iterable[str] = (),
     sinks = {}
     for c, kw in keywords.items():
         keys = list({k.lower(): k for k in reversed(list(kw))}.values())[::-1]
+        if all(line is None for line in kw.values()):
+            # no line numbers (BinaryCIF): dictionary order, then the rest
+            order = [k.lower() for k in (keyword_order(c.lstrip("_"))
+                                         if keyword_order else ())]
+            pos = {k: i for i, k in enumerate(order)}
+            keys.sort(key=lambda k: (pos.get(k.lower(), len(pos)),
+                                     k.lower()))
         if keys:
             sinks[c] = _RowSink(c, keys)
     with _Opened(path, lambda f: progress("reading", f)) as fh:
