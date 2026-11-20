@@ -131,7 +131,7 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.small { padding: 0 5px; font-size: 11px; }
-#theme { font-size: 14px; line-height: 1; padding: 3px 7px; }
+#theme { font-size: 15px; line-height: 1; padding: 3px 6px; }
 .linkbtn { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; }
 .linkbtn:hover { text-decoration: underline; }
 

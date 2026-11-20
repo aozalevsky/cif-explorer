@@ -76,7 +76,7 @@ In the browser:
 | jump from the tree to the table | `⌖ table` on a node |
 | re-root the tree | `⤒ root` on a node |
 | resize a panel | drag its divider; double-click the divider to reset |
-| dark / light theme | ☀ / ☾ button, top right (dark by default) |
+| dark / light theme | ◐ button, top right (dark by default) |
 
 The theme and panel sizes are saved in
 `~/.config/cif_explorer/prefs.json` (`$XDG_CONFIG_HOME` and

@@ -887,7 +887,6 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   const next = theme === 'dark' ? 'light' : 'dark';
   const btn = $('#theme');
-  btn.textContent = theme === 'dark' ? '\u2600\uFE0E' : '\u263E\uFE0E';
   btn.title = `Switch to the ${next} theme`;
   btn.setAttribute('aria-label', btn.title);
 }
