@@ -21,24 +21,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.12", "3.13", "3.14"]
         deps: [latest]
         include:
-          # the oldest versions pyproject.toml allows (ihm 2.1, numpy 1.22)
-          - python: "3.10"
+          # the oldest numpy and msgpack pyproject.toml allows
+          - python: "3.12"
             deps: oldest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
       - uses: astral-sh/setup-uv@v10.4.0
+      # Python comes from uv (no setup-python needed)
       - name: Install
-        run: >-
-          uv pip install --system -e ".[test]"
-          ${{ matrix.deps == 'oldest' && '--resolution lowest-direct' || '' }}
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e ".[test]" ${{ matrix.deps == 'oldest' && '--resolution lowest-direct' || '' }}
       - name: Test
-        run: python -m pytest -q
+        run: .venv/bin/python -m pytest -q
 
   build:
     runs-on: ubuntu-latest

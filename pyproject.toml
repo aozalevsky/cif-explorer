@@ -7,7 +7,7 @@ name = "cif-explorer"
 dynamic = ["version"]
 description = "Browser-based explorer for IHMCIF files: trace rows up and down the category hierarchy, with live dictionary checks and live reload"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Arthur Zalevsky", email = "aozalevsky@gmail.com" }]
@@ -17,13 +17,17 @@ classifiers = [
     "Environment :: Web Environment",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    "ihm>=2.1",
-    "numpy>=1.22",
-    "msgpack",
+    "ihm>=2.13",
+    "numpy>=1.26",
+    "msgpack>=1.0.6",
 ]
 
 [project.urls]
@@ -31,7 +35,7 @@ Homepage = "https://github.com/aozalevsky/cif-explorer"
 Issues = "https://github.com/aozalevsky/cif-explorer/issues"
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=8"]
 
 [project.scripts]
 cif_explorer = "cif_explorer.cli:main"
