@@ -47,7 +47,8 @@ cif_explorer 9A1N.cif          # opens http://localhost:<port>/ in the browser
 ## Install
 
 ```
-pip install cif-explorer        # once released
+uv tool install cif-explorer    # or: pipx install cif-explorer
+pip install cif-explorer
 pip install -e .                # from a checkout
 ```
 
