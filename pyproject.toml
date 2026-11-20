@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cif-explorer"
 dynamic = ["version"]
-description = "Browser-based explorer for IHMCIF/mmCIF files: trace rows up and down the category hierarchy, with live dictionary checks and live reload"
+description = "Browser-based explorer for IHMCIF files: trace rows up and down the category hierarchy, with live dictionary checks and live reload"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    "ihm>=2.0",
+    "ihm>=2.1",
     "numpy>=1.22",
     "msgpack",
 ]
