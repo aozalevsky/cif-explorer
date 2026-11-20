@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.18"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,9 +8,14 @@ dynamic = ["version"]
 description = "Browser-based explorer for IHMCIF/mmCIF files: trace rows up and down the category hierarchy, with live dictionary checks and live reload"
 readme = "README.md"
 requires-python = ">=3.9"
-authors = [{ name = "Arthur Zalevsky" }]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Arthur Zalevsky", email = "aozalevsky@gmail.com" }]
 keywords = ["mmCIF", "IHMCIF", "PDB-IHM", "integrative structure", "biocuration"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
@@ -20,6 +25,10 @@ dependencies = [
     "numpy>=1.22",
     "msgpack",
 ]
+
+[project.urls]
+Homepage = "https://github.com/aozalevsky/cif-explorer"
+Issues = "https://github.com/aozalevsky/cif-explorer/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=7"]

@@ -101,3 +101,7 @@ pytest
 
 All CIF parsing is delegated to [python-ihm](https://github.com/ihmwg/python-ihm);
 this package contains no tokenizer of its own.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
