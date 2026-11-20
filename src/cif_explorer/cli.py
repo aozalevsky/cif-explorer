@@ -44,28 +44,41 @@ def main(argv=None):
     if not os.path.isfile(path):
         sys.exit("cif_explorer: no such file: %s" % args.file)
 
-    dic, messages = load_dictionary(args.dict, update=args.update_dicts)
+    try:
+        dic, messages = load_dictionary(args.dict, update=args.update_dicts)
+    except OSError as exc:
+        sys.exit("cif_explorer: %s" % exc)
     for m in messages:
         print("dictionary: %s" % m, file=sys.stderr)
     session = Session(path, dic, messages)
 
     httpd = make_server(session, host=args.host, port=args.port)
     host, port = httpd.server_address[:2]
-    url = "http://%s:%d/" % ("localhost" if host in ("127.0.0.1", "::1")
-                             else host, port)
+    disp = ("localhost" if host in ("127.0.0.1", "::1")
+            else ("[%s]" % host if ":" in host else host))
+    url = "http://%s:%d/" % (disp, port)
     print("cif_explorer %s: %s" % (__version__, path))
     print("serving on %s  (Ctrl+C to stop)" % url, flush=True)
 
-    threading.Thread(target=session.load, daemon=True).start()
+    threading.Thread(target=session.load, kwargs={"background_checks": True},
+                     daemon=True).start()
+    watcher = None
     if not args.no_watch:
-        Watcher(session).start()
+        watcher = Watcher(session)
+        watcher.start()
+    timer = None
     if not args.no_browser:
-        threading.Timer(0.3, webbrowser.open, args=(url,)).start()
+        timer = threading.Timer(0.3, webbrowser.open, args=(url,))
+        timer.start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print()
     finally:
+        if timer is not None:
+            timer.cancel()
+        if watcher is not None:
+            watcher.stop_event.set()
         httpd.server_close()
 
 

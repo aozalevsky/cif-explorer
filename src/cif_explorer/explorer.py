@@ -82,12 +82,14 @@ def _clean_text(s: Optional[str]) -> str:
     if not s:
         return ""
     lines = s.strip("\n").splitlines()
+    if not lines:
+        return ""
     # strip the indentation shared by most lines (the dictionaries indent
     # prose by ~15 columns but the first line and odd lines differ)
     indents = Counter(len(ln) - len(ln.lstrip(" ")) for ln in lines[1:]
                       if ln.strip())
     base = indents.most_common(1)[0][0] if indents else 0
-    rest = [ln[base:] if ln[:base].isspace() else ln.lstrip()
+    rest = [ln[base:] if (base == 0 or ln[:base].isspace()) else ln.lstrip()
             for ln in lines[1:]]
     text = "\n".join([lines[0].strip()] + rest)
     out, cur = [], []
@@ -158,19 +160,30 @@ class Session:
             except queue.Full:
                 pass
 
-    def _progress(self, stage: str, fraction: float, kind="load"):
-        target = self.progress if kind == "load" else self.check_progress
-        target["stage"], target["fraction"] = stage, fraction
+    def _progress(self, stage: str, fraction: float, kind="load",
+                  version: Optional[int] = None):
         now = time.time()
-        if now - self._last_progress_sent > 0.25 or fraction >= 1.0:
-            self._last_progress_sent = now
+        send = False
+        with self._lock:
+            if version is not None and version != self.version:
+                return
+            snap = {"stage": stage, "fraction": fraction}
+            if kind == "load":
+                self.progress = snap
+            else:
+                self.check_progress = snap
+            if now - self._last_progress_sent > 0.25 or fraction >= 1.0:
+                self._last_progress_sent = now
+                send = True
+        if send:
             self.broadcast({"type": "status", "status": self.status()})
 
     # -- loading ------------------------------------------------------------
-    def load(self) -> bool:
+    def load(self, background_checks: bool = False) -> bool:
         """(Re)load the file. On failure the previous data stays active."""
         with self._load_lock:
-            self.loading = True
+            with self._lock:
+                self.loading = True
             try:
                 st = os.stat(self.path)
                 stat_key = (st.st_mtime, st.st_size)
@@ -181,28 +194,34 @@ class Session:
                 data = store.load(self.path, cats, progress=self._progress,
                                   keyword_order=self._keyword_order)
             except Exception as exc:  # parse errors, I/O errors
-                if self.loaded_stat is None:
-                    self.loaded_stat = (0.0, -1)
-                self.error = "%s: %s" % (type(exc).__name__, exc)
-                if self.data is None:
-                    self.state = "error"
-                self.loading = False
-                self.progress = {"stage": "failed", "fraction": 0.0}
+                with self._lock:
+                    if self.loaded_stat is None:
+                        self.loaded_stat = (0.0, -1)
+                    self.error = "%s: %s" % (type(exc).__name__, exc)
+                    if self.data is None:
+                        self.state = "error"
+                    self.loading = False
+                    self.progress = {"stage": "failed", "fraction": 0.0}
                 self.broadcast({"type": "error", "message": self.error,
                                 "status": self.status()})
                 return False
             with self._lock:
                 self.data = data
                 self.version += 1
+                version = self.version
                 self.state = "ready"
                 self.loading = False
                 self.error = None
                 self.checker = Checker(self.dic)
                 self.issues = None
-            self.broadcast({"type": "reload", "version": self.version,
+                self.check_progress = {"stage": "", "fraction": 0.0}
+            self.broadcast({"type": "reload", "version": version,
                             "status": self.status()})
+        if background_checks:
+            threading.Thread(target=self.run_checks, daemon=True).start()
+        else:
             self.run_checks()
-            return True
+        return True
 
     def _keyword_order(self, cat: str) -> List[str]:
         if self.dic is None or self.dic.ihm is None:
@@ -211,12 +230,13 @@ class Session:
         return list(c.keywords) if c else []
 
     def run_checks(self) -> None:
-        data, version, checker = self.data, self.version, self.checker
+        with self._lock:
+            data, version, checker = self.data, self.version, self.checker
         if data is None:
             return
         try:
             issues = checker.run(data, progress=lambda s, f: self._progress(
-                s, f, kind="check"))
+                s, f, kind="check", version=version))
         except Exception:
             traceback.print_exc()
             issues = [Issue("error", "internal", "", "checks failed: see "
@@ -246,40 +266,43 @@ class Session:
             except Exception as exc:
                 msgs = ["validator failed: %s: %s" % (type(exc).__name__,
                                                       exc)]
-            self.validator = {"state": "done", "messages": msgs[:2000],
-                              "truncated": len(msgs) > 2000,
-                              "version": data_version,
-                              "seconds": round(time.time() - t0, 1)}
+            with self._lock:
+                self.validator = {"state": "done", "messages": msgs[:2000],
+                                  "truncated": len(msgs) > 2000,
+                                  "version": data_version,
+                                  "seconds": round(time.time() - t0, 1)}
             self.broadcast({"type": "validator", "status": self.status()})
         threading.Thread(target=work, daemon=True).start()
         return True
 
-    def file_changed(self) -> bool:
-        try:
-            st = os.stat(self.path)
-        except OSError:
-            return False
-        return (st.st_mtime, st.st_size) != self.loaded_stat
-
     # -- status -------------------------------------------------------------
     def status(self) -> dict:
-        data = self.data
+        with self._lock:
+            data = self.data
+            issues = self.issues
+            state = self.state
+            loading = self.loading
+            version = self.version
+            error = self.error
+            progress = dict(self.progress)
+            check_progress = dict(self.check_progress)
+            validator = {k: v for k, v in self.validator.items()
+                         if k != "messages"}
         counts = {"error": 0, "warning": 0, "info": 0}
-        if self.issues is not None:
-            for i in self.issues:
+        if issues is not None:
+            for i in issues:
                 counts[i.severity] = counts.get(i.severity, 0) + 1
         return {
-            "state": self.state,
-            "loading": self.loading,
-            "version": self.version,
-            "error": self.error,
-            "progress": self.progress,
-            "checks": ("done" if self.issues is not None
+            "state": state,
+            "loading": loading,
+            "version": version,
+            "error": error,
+            "progress": progress,
+            "checks": ("done" if issues is not None
                        else ("running" if data is not None else "waiting")),
-            "check_progress": self.check_progress,
+            "check_progress": check_progress,
             "issue_counts": counts,
-            "validator": {k: v for k, v in self.validator.items()
-                          if k != "messages"},
+            "validator": validator,
             "file": {
                 "path": self.path, "name": os.path.basename(self.path),
                 "size": data.size if data else None,
@@ -307,9 +330,11 @@ class Views:
 
     def __init__(self, session: Session):
         self.session = session
-        self.data: CifData = session.data
-        self.dic: Optional[DictInfo] = session.dic
-        self.checker: Checker = session.checker
+        with session._lock:
+            self.data: CifData = session.data
+            self.dic: Optional[DictInfo] = session.dic
+            self.checker: Checker = session.checker
+            self.version: int = session.version
         if self.data is None:
             raise NotFound("no data loaded")
 
@@ -329,20 +354,45 @@ class Views:
     def ref(self, t: Table, i: int) -> str:
         keys = self.key_items(t)
         if keys:
-            return "k:" + json.dumps([t.get(i, k) for k in keys])
+            vals = [t.get(i, k) for k in keys]
+            if i in self.checker.duplicate_rows(self.data, t, tuple(keys)):
+                rows = t.find(list(zip(keys, vals)))
+                pos = int(np.searchsorted(rows, i))
+                if pos > 0:
+                    return "k%d:%s" % (pos, json.dumps(vals))
+            return "k:" + json.dumps(vals)
         return "i:%d" % i
 
     def resolve(self, t: Table, ref: str) -> Optional[int]:
+        if not isinstance(ref, str):
+            return None
         if ref.startswith("i:"):
-            i = int(ref[2:])
+            try:
+                i = int(ref[2:])
+            except ValueError:
+                return None
             return i if 0 <= i < t.nrows else None
-        if ref.startswith("k:"):
+        if ref.startswith("k") and ":" in ref:
+            head, payload = ref.split(":", 1)
+            occ = 0
+            if len(head) > 1:
+                try:
+                    occ = int(head[1:])
+                except ValueError:
+                    return None
+                if occ < 0:
+                    return None
             keys = self.key_items(t)
-            vals = json.loads(ref[2:])
-            if not keys or len(keys) != len(vals):
+            try:
+                vals = json.loads(payload)
+            except ValueError:
+                return None
+            if (not keys or not isinstance(vals, list)
+                    or len(keys) != len(vals)
+                    or not all(isinstance(v, str) for v in vals)):
                 return None
             rows = t.find(list(zip(keys, vals)))
-            return int(rows[0]) if len(rows) else None
+            return int(rows[occ]) if occ < len(rows) else None
         return None
 
     def label(self, t: Table, i: int) -> str:
@@ -375,7 +425,8 @@ class Views:
         return self.dic.display_name(t.name, item) if self.dic else item
 
     # -- link resolution --------------------------------------------------
-    def _parent_conds(self, t: Table, i: int, link: Link
+    def _parent_conds(self, t: Table, i: int, link: Link,
+                      pt: Optional[Table] = None
                       ) -> Tuple[Optional[list], list]:
         """Conditions on the parent for row i of child table t, and the
         (child item, value) pairs used. None if not applicable."""
@@ -385,6 +436,8 @@ class Views:
             if not t.has(c):
                 if direct:
                     return None, []
+                continue
+            if not direct and pt is not None and not pt.has(p):
                 continue
             v = t.get(i, c)
             if v in NULLS:
@@ -419,7 +472,8 @@ class Views:
         for link in self.dic.parents_of(t.name):
             if not t.has(link.child_items[0]):
                 continue
-            conds, used = self._parent_conds(t, i, link)
+            pt = self.data.get(link.parent)
+            conds, used = self._parent_conds(t, i, link, pt)
             entry = {"link": link.id, "parent": link.parent,
                      "via": [{"child": c, "value": v} for c, v in used],
                      "items": list(link.child_items),
@@ -430,7 +484,6 @@ class Views:
                 entry["status"] = "null"
                 out.append(entry)
                 continue
-            pt = self.data.get(link.parent)
             if pt is None:
                 entry["status"] = "no_category"
                 out.append(entry)
@@ -474,8 +527,10 @@ class Views:
     # -- public views -----------------------------------------------------
     def summary(self) -> dict:
         counts: Dict[str, Dict[str, int]] = {}
-        issues = self.session.issues if (
-            self.session.issues_version == self.session.version) else None
+        with self.session._lock:
+            issues = (self.session.issues
+                      if self.session.issues_version == self.version
+                      else None)
         for iss in issues or ():
             c = counts.setdefault(iss.category, {})
             c[iss.severity] = c.get(iss.severity, 0) + 1
@@ -502,7 +557,7 @@ class Views:
         children = []
         if self.dic:
             for link in self.dic.parents_of(t.name):
-                if not t.has(link.child_items[0]):
+                if not all(t.has(c) for c in link.child_items[:link.n_direct]):
                     continue
                 parents.append({"cat": link.parent, "link": link.id,
                                 "via": link.describe(),
@@ -574,14 +629,13 @@ class Views:
             idx = rows[offset:offset + limit]
             values = t.take(idx)
         out_rows = []
-        keyset_cache: Dict[str, object] = {}
         for i, vals in zip(idx.tolist(), values):
             flags = {}
             for j, (item, v) in enumerate(zip(t.items, vals)):
                 msg = self.checker.check_value(t.name, item, v)
                 if msg:
                     flags[j] = msg
-            for j, msg in self._link_flags(t, i, keyset_cache):
+            for j, msg in self._link_flags(t, i):
                 flags.setdefault(j, msg)
             out_rows.append({"idx": i, "ref": self.ref(t, i),
                              "values": vals, "flags": flags})
@@ -602,7 +656,7 @@ class Views:
                 "known": kw is not None or self.dic is None,
                 "mandatory": bool(kw.mandatory) if kw else False}
 
-    def _link_flags(self, t: Table, i: int, cache) -> List[Tuple[int, str]]:
+    def _link_flags(self, t: Table, i: int) -> List[Tuple[int, str]]:
         """Cells of row i whose parent row does not exist."""
         out = []
         if self.dic is None:
@@ -611,7 +665,7 @@ class Views:
             pt = self.data.get(link.parent)
             if pt is None or not t.has(link.child_items[0]):
                 continue
-            conds, used = self._parent_conds(t, i, link)
+            conds, used = self._parent_conds(t, i, link, pt)
             if not conds or not all(pt.has(p) for p, _ in conds):
                 continue
             pitems = tuple(p for p, _ in conds)
@@ -629,7 +683,7 @@ class Views:
         if i is None:
             raise NotFound("row %s no longer exists in %s" % (ref, cat))
         vals = t.row(i)
-        link_flags = dict(self._link_flags(t, i, {}))
+        link_flags = dict(self._link_flags(t, i))
         fields = []
         for j, (item, v) in enumerate(zip(t.items, vals)):
             fields.append({"item": item, "name": t.display[j], "value": v,
@@ -650,10 +704,16 @@ class Views:
         if i is None:
             raise NotFound("row %s no longer exists in %s" % (ref, cat))
         link = self.find_link(link_id)
+        if link.parent != t.name:
+            raise NotFound("link %s does not apply to %s" % (link_id, t.name))
         ct = self.table(link.child)
-        conds = self._child_conds(t, i, link, ct) or []
-        rows = ct.find(conds)
+        conds = self._child_conds(t, i, link, ct)
+        offset = max(0, int(offset))
         limit = max(1, min(int(limit), MAX_PAGE))
+        if conds is None:
+            return {"link": link_id, "child": ct.name, "count": 0,
+                    "offset": offset, "filters": [], "rows": []}
+        rows = ct.find(conds)
         sel = rows[offset:offset + limit]
         return {"link": link_id, "child": ct.name, "count": int(len(rows)),
                 "offset": offset,
@@ -663,21 +723,27 @@ class Views:
     def resolve_refs(self, refs: Sequence[dict]) -> List[Optional[dict]]:
         out = []
         for r in refs:
+            if not isinstance(r, dict):
+                out.append(None)
+                continue
             try:
                 t = self.table(r.get("cat"))
                 i = self.resolve(t, r.get("ref", ""))
                 out.append(None if i is None else self.row_summary(t, i))
-            except (NotFound, ValueError, json.JSONDecodeError):
+            except (NotFound, ValueError, TypeError):
                 out.append(None)
         return out
 
     def issues(self) -> dict:
         s = self.session
-        ready = s.issues is not None and s.issues_version == s.version
+        with s._lock:
+            issues = s.issues
+            ready = issues is not None and s.issues_version == self.version
+            validator = dict(s.validator)
         items = []
         if ready:
             order = {"error": 0, "warning": 1, "info": 2}
-            for iss in sorted(s.issues, key=lambda x: (
+            for iss in sorted(issues, key=lambda x: (
                     order.get(x.severity, 3), x.category, x.items)):
                 j = iss.to_json()
                 t = self.data.get(iss.category)
@@ -686,7 +752,7 @@ class Views:
                                  if r < t.nrows]
                 items.append(j)
         return {"ready": ready, "issues": items,
-                "validator": s.validator}
+                "validator": validator}
 
     def search(self, q: str, limit_per_cat: int = 5) -> dict:
         q = q.strip()

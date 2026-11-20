@@ -35,6 +35,7 @@ def test_index_gets_saved_prefs():
     # the default page is unchanged apart from the values
     assert '<html lang="en" data-theme="dark">' in render_index(
         {"theme": "dark"}).decode()
+    assert '<html lang="en" data-theme="dark">' in render_index({}).decode()
 
 
 def test_prefs_http():

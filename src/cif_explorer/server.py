@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import queue
+import socket
 import threading
 import time
 import traceback
@@ -25,9 +26,10 @@ def render_index(saved: dict) -> bytes:
     """index.html with the saved preferences filled in, so the page starts
     in the right theme and panel sizes without a flash."""
     html = STATIC.joinpath("index.html").read_text(encoding="utf-8")
+    theme = saved.get("theme", "dark")
     blob = json.dumps(saved).replace("<", "\\u003c")
-    html = html.replace(HTML_TAG, HTML_TAG.replace("dark", saved["theme"]))
-    html = html.replace(PREFS_TAG, PREFS_TAG.replace("{}", blob))
+    html = html.replace(HTML_TAG, HTML_TAG.replace("dark", theme, 1), 1)
+    html = html.replace(PREFS_TAG, PREFS_TAG.replace("{}", blob, 1), 1)
     return html.encode("utf-8")
 
 
@@ -67,9 +69,10 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, name: str):
         if not name or name.endswith("/"):
             name += "index.html"
-        if ".." in name.split("/"):
+        parts = name.split("/")
+        if any(part in ("", ".", "..") or "\\" in part for part in parts):
             return self._error(404, "not found")
-        res = STATIC.joinpath(*name.split("/"))
+        res = STATIC.joinpath(*parts)
         if not res.is_file():
             return self._error(404, "not found")
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -104,11 +107,10 @@ class Handler(BaseHTTPRequestHandler):
                     if ":" in f:
                         item, value = f.split(":", 1)
                         filters.append((item, value))
-                around = params.get("around")
                 return self._json(views.table_page(
                     p("cat"), offset=_int(params, "offset", 0),
                     limit=_int(params, "limit", 100), filters=filters,
-                    q=p("q"), around=int(around[0]) if around else None))
+                    q=p("q"), around=_int(params, "around", None)))
             if path == "/api/row":
                 return self._json(views.row_detail(p("cat"), p("ref")))
             if path == "/api/children":
@@ -136,9 +138,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlparse(self.path)
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(n) or b"{}")
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._error(400, "invalid Content-Length")
+            if n < 0:
+                return self._error(400, "invalid Content-Length")
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except ValueError:
+                return self._error(400, "invalid JSON body")
             if url.path == "/api/resolve":
+                if not isinstance(body, dict) or not isinstance(
+                        body.get("refs", []), list):
+                    return self._error(400, "expected JSON object with 'refs'")
                 views = Views(self.session)
                 return self._json({"rows": views.resolve_refs(
                     body.get("refs", []))})
@@ -149,11 +162,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(prefs.update(body))
             if url.path == "/api/reload":
                 threading.Thread(target=self.session.load,
+                                 kwargs={"background_checks": True},
                                  daemon=True).start()
                 return self._json({"started": True})
             return self._error(404, "unknown endpoint")
         except NotFound as exc:
             return self._error(404, str(exc))
+        except (BrokenPipeError, ConnectionResetError):
+            return
         except Exception as exc:
             traceback.print_exc()
             return self._error(500, "%s: %s" % (type(exc).__name__, exc))
@@ -212,12 +228,15 @@ class Watcher(threading.Thread):
             if self._stat() != cur:
                 continue
             self.session.broadcast({"type": "changed"})
-            self.session.load()
+            self.session.load(background_checks=True)
 
 
 def make_server(session: Session, host: str = "127.0.0.1",
                 port: int = 0) -> ThreadingHTTPServer:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    server_cls = type("Server", (ThreadingHTTPServer,),
+                      {"address_family": family})
     handler = type("BoundHandler", (Handler,), {"session": session})
-    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd = server_cls((host, port), handler)
     httpd.daemon_threads = True
     return httpd
