@@ -72,7 +72,7 @@ input { font: inherit; color: inherit; }
 /* layout */
 #layout { flex: 1; display: flex; min-height: 0; }
 #sidebar {
-  width: 250px; flex: none; border-right: 1px solid var(--border); background: var(--panel);
+  width: 250px; flex: none; background: var(--panel);
   display: flex; flex-direction: column; min-height: 0;
 }
 #catfilter { margin: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
@@ -93,8 +93,12 @@ input { font: inherit; color: inherit; }
 .dot.info { background: var(--info-soft); color: var(--info); }
 
 #main { flex: 1; min-width: 300px; display: flex; flex-direction: column; min-height: 0; }
-#splitter { width: 5px; cursor: col-resize; background: var(--border); flex: none; }
-#splitter:hover { background: var(--accent); }
+.splitter { flex: none; background: var(--border); touch-action: none; }
+.splitter.v { width: 5px; cursor: col-resize; }
+.splitter.h { height: 5px; cursor: row-resize; }
+.splitter:hover, .splitter.dragging { background: var(--accent); }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none !important; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none !important; }
 #trace { width: 42%; min-width: 280px; flex: none; display: flex; flex-direction: column; background: var(--panel); min-height: 0; }
 .panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex: none; }
 .panel-title { font-weight: 600; }
@@ -186,7 +190,7 @@ table.kv td.k { font-weight: 600; white-space: nowrap; vertical-align: top; }
 .bad-label { color: var(--err); }
 
 /* issues drawer */
-.drawer { height: 34%; min-height: 120px; border-top: 2px solid var(--border); background: var(--panel); display: flex; flex-direction: column; flex: none; }
+.drawer { height: 34%; min-height: 80px; background: var(--panel); display: flex; flex-direction: column; flex: none; }
 #issues-body { overflow: auto; flex: 1; padding: 4px 0 20px; }
 .issue { display: grid; grid-template-columns: 22px minmax(180px, 340px) 1fr; gap: 6px; padding: 3px 12px; border-bottom: 1px solid var(--border); align-items: start; }
 .issue:hover { background: var(--hover); }

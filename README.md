@@ -75,6 +75,7 @@ In the browser:
 | dictionary definition | hover a column header or field name |
 | jump from the tree to the table | `⌖ table` on a node |
 | re-root the tree | `⤒ root` on a node |
+| resize a panel | drag its divider; double-click the divider to reset |
 
 ## Limitations / ideas
 

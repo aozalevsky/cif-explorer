@@ -874,6 +874,48 @@ async function showTip(el) {
 
 /* ------------------------------------------------------------------ setup */
 
+/* Drag `handle` to set the width (or height, with `vertical`) of `panel`.
+   The size is kept in localStorage; double-click the handle to go back to
+   the default from the stylesheet. */
+function resizable(handle, panel, { key, min, max, size, vertical = false }) {
+  const prop = vertical ? 'height' : 'width';
+  const cls = vertical ? 'resizing-y' : 'resizing-x';
+  const apply = px => {
+    panel.style[prop] = Math.round(Math.max(min, Math.min(max(), px))) + 'px';
+  };
+  const restore = () => {
+    const saved = parseFloat(localStorage.getItem(key));
+    if (saved > 0) apply(saved);
+  };
+  restore();
+  handle.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('dragging');
+    document.body.classList.add(cls);
+    const move = ev => apply(size(ev));
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      handle.classList.remove('dragging');
+      document.body.classList.remove(cls);
+      localStorage.setItem(key, parseFloat(panel.style[prop]));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', () => {
+    panel.style[prop] = '';
+    localStorage.removeItem(key);
+  });
+  // a smaller window must not squeeze the table out of view; growing it
+  // again brings back the saved size
+  window.addEventListener('resize', restore);
+}
+
 function setupUI() {
   $('#catfilter').addEventListener('input', renderSidebar);
   $('#searchform').addEventListener('submit', e => { e.preventDefault(); runSearch($('#search').value.trim()); });
@@ -908,24 +950,23 @@ function setupUI() {
     await post('/api/validate');
     renderIssues();
   });
-  // resizable trace panel
-  const split = $('#splitter');
-  const trace = $('#trace');
-  const saved = localStorage.getItem('cifx-trace-width');
-  if (saved) trace.style.width = saved;
-  split.addEventListener('mousedown', e => {
-    e.preventDefault();
-    const move = ev => {
-      const w = Math.max(280, Math.min(window.innerWidth - 500, window.innerWidth - ev.clientX));
-      trace.style.width = w + 'px';
-    };
-    const up = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
-      localStorage.setItem('cifx-trace-width', trace.style.width);
-    };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+  // resizable panels; the table in the middle always keeps MAIN_MIN pixels
+  const sidebar = $('#sidebar'), trace = $('#trace'), issues = $('#issues');
+  const MAIN_MIN = 300, SPLITS = 10;
+  resizable($('#sidebar-split'), sidebar, {
+    key: 'cifx-sidebar-width', min: 140,
+    max: () => window.innerWidth - trace.offsetWidth - SPLITS - MAIN_MIN,
+    size: ev => ev.clientX - sidebar.getBoundingClientRect().left,
+  });
+  resizable($('#trace-split'), trace, {
+    key: 'cifx-trace-width', min: 280,
+    max: () => window.innerWidth - sidebar.offsetWidth - SPLITS - MAIN_MIN,
+    size: ev => window.innerWidth - ev.clientX,
+  });
+  resizable($('#issues-split'), issues, {
+    key: 'cifx-issues-height', min: 80, vertical: true,
+    max: () => window.innerHeight - $('#layout').getBoundingClientRect().top - 120,
+    size: ev => window.innerHeight - ev.clientY,
   });
   if (state.issuesOpen) $('#issues').classList.remove('hidden');
 }

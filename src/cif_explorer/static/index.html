@@ -23,10 +23,11 @@
     <input id="catfilter" type="search" placeholder="Filter categories" spellcheck="false">
     <div id="catlist"></div>
   </nav>
+  <div id="sidebar-split" class="splitter v" title="Drag to resize, double-click to reset"></div>
   <section id="main">
     <div id="tableview" class="empty-state">Pick a category on the left.</div>
   </section>
-  <div id="splitter" title="Drag to resize"></div>
+  <div id="trace-split" class="splitter v" title="Drag to resize, double-click to reset"></div>
   <aside id="trace">
     <div class="panel-head">
       <span class="panel-title">Trace</span>
@@ -39,6 +40,7 @@
   </aside>
 </main>
 <section id="issues" class="drawer hidden">
+  <div id="issues-split" class="splitter h" title="Drag to resize, double-click to reset"></div>
   <div class="panel-head">
     <span class="panel-title">Dictionary checks</span>
     <span id="issues-summary" class="muted"></span>
