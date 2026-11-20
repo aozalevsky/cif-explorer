@@ -15,15 +15,17 @@ from __future__ import annotations
 import gzip
 import io
 import re
+import threading
+import weakref
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 import ihm.dictionary
 
 from .dictionary import DictInfo, Link
-from .store import NULLS, CifData, Column, DenseColumn, Table
+from .store import NULLS, CatColumn, CifData, Column, DenseColumn, ListColumn, Table
 
 MAX_EXAMPLES = 25
 
@@ -72,14 +74,13 @@ def _in_ranges(x: float, ranges) -> bool:
 
 
 # bytes allowed in plain decimal numbers (0 = numpy padding)
+_DIGIT_LUT = np.zeros(256, dtype=bool)
+for _c in b"0123456789":
+    _DIGIT_LUT[_c] = True
 _FLOAT_LUT = np.zeros(256, dtype=bool)
 for _c in b"0123456789.-+eE":
     _FLOAT_LUT[_c] = True
 _FLOAT_LUT[0] = True
-_INT_LUT = np.zeros(256, dtype=bool)
-for _c in b"0123456789-+":
-    _INT_LUT[_c] = True
-_INT_LUT[0] = True
 
 
 _CHARCLASS_STAR = re.compile(r"\[\]?[^\]]*\]\*")
@@ -92,46 +93,101 @@ def _charset_lut(item_type) -> Optional[np.ndarray]:
     if item_type is None or not _CHARCLASS_STAR.fullmatch(
             item_type.construct):
         return None
+    try:
+        exact = re.compile(item_type.construct + r"\Z")
+    except re.error:
+        return None
     lut = np.zeros(256, dtype=bool)
     for b in range(1, 128):
-        lut[b] = bool(item_type.regex.match(chr(b)))
+        lut[b] = bool(exact.match(chr(b)))
     lut[0] = True        # numpy padding
     return lut
+
+
+def _find_bad_floats(arr: np.ndarray, cand_idx: np.ndarray) -> np.ndarray:
+    """Locate indices in ``cand_idx`` whose bytes fail float64 conversion."""
+    bad: List[np.ndarray] = []
+    for start in range(0, len(cand_idx), 4096):
+        chunk = cand_idx[start:start + 4096]
+        try:
+            arr[chunk].astype(np.float64)
+        except ValueError:
+            for s2 in range(0, len(chunk), 64):
+                sub = chunk[s2:s2 + 64]
+                try:
+                    arr[sub].astype(np.float64)
+                except ValueError:
+                    bad.append(sub)
+    if not bad:
+        return np.empty(0, dtype=np.int64)
+    return np.concatenate(bad)
+
+
+class _DenseKeySet:
+    """Compact membership container for a single-column bytes DenseColumn."""
+
+    def __init__(self, arr: np.ndarray):
+        self._uniq = np.unique(arr)
+        self._max_len = arr.dtype.itemsize
+
+    def __contains__(self, key) -> bool:
+        if not isinstance(key, tuple) or len(key) != 1:
+            return False
+        try:
+            b = key[0].encode("ascii")
+        except (AttributeError, UnicodeEncodeError):
+            return False
+        if len(b) > self._max_len or not len(self._uniq):
+            return False
+        i = int(np.searchsorted(self._uniq, b))
+        return i < len(self._uniq) and self._uniq[i] == b
 
 
 class Checker:
     def __init__(self, dic: Optional[DictInfo]):
         self.dic = dic
+        self._lock = threading.RLock()
         self._luts: Dict[str, Optional[np.ndarray]] = {}
         self._cell_cache: Dict[Tuple[str, str, str], Optional[str]] = {}
         self._ranges: Dict[Tuple[str, str], list] = {}
-        self._keysets: Dict[Tuple[int, str, Tuple[str, ...]], Set] = {}
+        self._data_ref: Optional[weakref.ref] = None
+        self._keysets: Dict[Tuple[str, Tuple[str, ...]], object] = {}
+        self._dup_rows: Dict[Tuple[str, Tuple[str, ...]], frozenset] = {}
+
+    def _bind_data(self, data: CifData) -> None:
+        if self._data_ref is None or self._data_ref() is not data:
+            self._keysets.clear()
+            self._dup_rows.clear()
+            self._data_ref = weakref.ref(data)
 
     # -- single values ------------------------------------------------------
     def _parsed_ranges(self, cat: str, item: str):
         key = (cat, item)
-        if key not in self._ranges:
+        with self._lock:
+            rs = self._ranges.get(key)
+        if rs is None:
             im = self.dic.item(cat, item) if self.dic else None
             rs = []
             if im is not None:
                 for lo, hi in im.ranges:
                     rs.append((_num(lo), _num(hi)))
-            self._ranges[key] = rs
-        return self._ranges[key]
+            with self._lock:
+                self._ranges[key] = rs
+        return rs
 
     def check_value(self, cat: str, item: str, value: str) -> Optional[str]:
         """Problem with one value, or None. Results are cached."""
         if self.dic is None:
             return None
         key = (cat, item, value)
-        try:
-            return self._cell_cache[key]
-        except KeyError:
-            pass
+        with self._lock:
+            if key in self._cell_cache:
+                return self._cell_cache[key]
         msg = self._check_value(cat, item, value)
-        if len(self._cell_cache) > 500000:
-            self._cell_cache.clear()
-        self._cell_cache[key] = msg
+        with self._lock:
+            if len(self._cell_cache) > 500000:
+                self._cell_cache.clear()
+            self._cell_cache[key] = msg
         return msg
 
     def _check_value(self, cat, item, value):
@@ -173,36 +229,75 @@ class Checker:
         return " or ".join(parts)
 
     # -- whole columns ------------------------------------------------------
-    def _numeric_fast_ok(self, col: Column, kw) -> Optional[np.ndarray]:
-        """For a dense bytes column, return a boolean 'maybe bad' mask (rows
-        needing an individual check), or None if no fast path applies."""
+    def _numeric_fast_ok(self, col: Column, kw, has_ranges: bool
+                         ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """For a dense bytes column, return (maybe_bad, nulls) masks if a fast
+        vectorized path applies, or None to fall back to factorize()."""
         if not isinstance(col, DenseColumn) or col.arr.dtype.kind != "S":
             return None
         it = kw.item_type
         if it is None or kw.enumeration:
             return None
-        numeric = it.primitive_code == "numb"
-        if numeric:
-            lut = (_INT_LUT if it.name in ("int", "positive_int")
-                   else _FLOAT_LUT)
+        arr = col.arr
+        n = len(arr)
+        if n == 0:
+            return None
+        width = arr.dtype.itemsize
+        u8 = arr.view(np.uint8).reshape(n, width)
+        nulls = (arr == b"?") | (arr == b".")
+        embedded_nul = (
+            ((u8[:, :-1] == 0) & (u8[:, 1:] != 0)).any(axis=1)
+            if width > 1 else np.zeros(n, dtype=bool))
+        if it.primitive_code == "numb":
+            if it.name == "int" and it.construct == "[+-]?[0-9]+":
+                digits = _DIGIT_LUT[u8]
+                pad = u8 == 0
+                first = u8[:, 0]
+                has_sign = (first == ord("+")) | (first == ord("-"))
+                if width == 1:
+                    ok = digits[:, 0]
+                else:
+                    ok = ((digits[:, 0] | (has_sign & digits[:, 1]))
+                          & (digits[:, 1:] | pad[:, 1:]).all(axis=1)
+                          & ~embedded_nul)
+                maybe_bad = ~nulls & ~ok
+            elif it.name == "positive_int" and it.construct == "[1-9][0-9]*":
+                digits = _DIGIT_LUT[u8]
+                pad = u8 == 0
+                first = u8[:, 0]
+                ok = (first >= ord("1")) & (first <= ord("9"))
+                if width > 1:
+                    ok &= ((digits[:, 1:] | pad[:, 1:]).all(axis=1)
+                           & ~embedded_nul)
+                maybe_bad = ~nulls & ~ok
+            elif it.name == "float":
+                chars_ok = (_FLOAT_LUT[u8].all(axis=1)
+                            & (u8[:, 0] != 0) & ~embedded_nul)
+                if not it.regex.match("+1"):
+                    chars_ok &= u8[:, 0] != ord("+")
+                maybe_bad = ~nulls & ~chars_ok
+                cand = ~nulls & chars_ok
+                try:
+                    arr[cand].astype(np.float64)
+                except ValueError:
+                    bad_idx = _find_bad_floats(arr, np.flatnonzero(cand))
+                    maybe_bad[bad_idx] = True
+            else:
+                return None
         else:
-            if it.name not in self._luts:
-                self._luts[it.name] = _charset_lut(it)
-            lut = self._luts[it.name]
+            if has_ranges:
+                return None
+            with self._lock:
+                if it.name not in self._luts:
+                    self._luts[it.name] = _charset_lut(it)
+                lut = self._luts[it.name]
             if lut is None:
                 return None
-        arr = col.arr
-        width = arr.dtype.itemsize
-        nulls = (arr == b"?") | (arr == b".")
-        chars_ok = lut[arr.view(np.uint8).reshape(len(arr), width)].all(
-            axis=1)
-        maybe_bad = ~nulls & ~chars_ok
-        if numeric:
-            try:
-                arr[~nulls & chars_ok].astype(np.float64)
-            except ValueError:
-                return ~nulls
-        return maybe_bad
+            chars_ok = lut[u8].all(axis=1) & ~embedded_nul
+            maybe_bad = ~nulls & ~chars_ok
+        if int(maybe_bad.sum()) > 50000:
+            return None
+        return maybe_bad, nulls
 
     def _column_problems(self, table: Table, item: str
                          ) -> Dict[str, Tuple[np.ndarray, List[str]]]:
@@ -212,25 +307,33 @@ class Checker:
         kw = self.dic.keyword(cat, item)
         if kw is None:
             return {}
-        problems: Dict[str, List] = {}
-        mask = self._numeric_fast_ok(col, kw)
-        if mask is not None:
+        rs = self._parsed_ranges(cat, item)
+        fast = self._numeric_fast_ok(col, kw, bool(rs))
+        if fast is not None:
+            mask, nulls = fast
+            problems: Dict[str, Tuple[List[np.ndarray], List[str]]] = {}
             rows = np.flatnonzero(mask)
-            # check the suspicious ones individually
-            for r in rows[:100000].tolist():
+            by_msg: Dict[str, Tuple[List[int], List[str]]] = {}
+            for r in rows.tolist():
                 v = col.value(r)
                 msg = self.check_value(cat, item, v)
                 if msg:
-                    problems.setdefault(msg, [[], []])
-                    problems[msg][0].append(r)
-                    if v not in problems[msg][1]:
-                        problems[msg][1].append(v)
-            # ranges / mandatory '?' still need checking on the fast path
-            rs = self._parsed_ranges(cat, item)
+                    entry = by_msg.setdefault(msg, ([], []))
+                    entry[0].append(r)
+                    if len(entry[1]) < MAX_EXAMPLES and v not in entry[1]:
+                        entry[1].append(v)
+            for msg, (rlist, vlist) in by_msg.items():
+                problems[msg] = ([np.asarray(rlist, dtype=np.int64)], vlist)
+            # ranges / mandatory '?' on rows not already checked above
             if rs or kw.mandatory:
-                self._dense_ranges(table, item, rs, kw, problems)
-            return {m: (np.asarray(sorted(set(r)), dtype=np.int64), v)
-                    for m, (r, v) in problems.items()}
+                self._dense_ranges(table, item, rs, kw, problems,
+                                   ~nulls & ~mask)
+            out = {}
+            for msg, (parts, vals) in problems.items():
+                arr = (parts[0] if len(parts) == 1
+                       else np.sort(np.concatenate(parts)))
+                out[msg] = (arr, vals)
+            return out
         uniques, codes = col.factorize()
         bad: Dict[str, List[int]] = {}
         for code, v in enumerate(uniques):
@@ -243,19 +346,21 @@ class Checker:
             out[msg] = (rows, [uniques[c] for c in bcodes[:MAX_EXAMPLES]])
         return out
 
-    def _dense_ranges(self, table, item, rs, kw, problems):
+    def _dense_ranges(self, table, item, rs, kw, problems, valid_mask):
         arr = table.columns[item].arr
         if kw.mandatory:
             rows = np.flatnonzero(arr == b"?")
             if len(rows):
                 msg = "mandatory item has value '?'"
-                problems.setdefault(msg, [[], []])
-                problems[msg][0].extend(rows.tolist())
-                problems[msg][1].append("?")
+                entry = problems.setdefault(msg, ([], []))
+                entry[0].append(rows)
+                if "?" not in entry[1]:
+                    entry[1].append("?")
         if not rs:
             return
-        nulls = (arr == b"?") | (arr == b".")
-        idx = np.flatnonzero(~nulls)
+        idx = np.flatnonzero(valid_mask)
+        if not len(idx):
+            return
         try:
             x = arr[idx].astype(np.float64)
         except ValueError:
@@ -275,10 +380,13 @@ class Checker:
         if len(bad):
             msg = "out of allowed range (%s)" % self.range_text(table.name,
                                                                 item)
-            problems.setdefault(msg, [[], []])
-            problems[msg][0].extend(bad.tolist())
-            problems[msg][1].extend(sorted(set(
-                table.columns[item].take(bad[:MAX_EXAMPLES]))))
+            entry = problems.setdefault(msg, ([], []))
+            entry[0].append(bad)
+            for v in sorted(set(table.columns[item].take(bad[:MAX_EXAMPLES]))):
+                if len(entry[1]) >= MAX_EXAMPLES:
+                    break
+                if v not in entry[1]:
+                    entry[1].append(v)
 
     def check_table(self, table: Table) -> List[Issue]:
         issues: List[Issue] = []
@@ -323,8 +431,6 @@ class Checker:
                                             DenseColumn):
             return self._duplicate_dense(table, cm.keys[0])
         key = _combined_codes(table, cm.keys)
-        if key is None:
-            return []
         uniq, first, counts = np.unique(key, return_index=True,
                                         return_counts=True)
         dup = counts > 1
@@ -342,6 +448,36 @@ class Checker:
                       count=len(rows), rows=rows[:MAX_EXAMPLES].tolist(),
                       values=vals)]
 
+    def duplicate_rows(self, data: CifData, table: Table,
+                       items: Tuple[str, ...]) -> frozenset:
+        """Row indices in ``table`` whose ``items`` tuple is not unique."""
+        if not items or table.nrows < 2:
+            return frozenset()
+        cache_key = (table.name, items)
+        with self._lock:
+            self._bind_data(data)
+            cached = self._dup_rows.get(cache_key)
+        if cached is not None:
+            return cached
+        if len(items) == 1 and isinstance(table.columns[items[0]],
+                                          DenseColumn):
+            arr = table.columns[items[0]].arr
+            uniq, counts = np.unique(arr, return_counts=True)
+            dup = uniq[counts > 1]
+            rows = (np.flatnonzero(np.isin(arr, dup))
+                    if len(dup) else np.empty(0, dtype=np.int64))
+        else:
+            key = _combined_codes(table, items)
+            uniq, counts = np.unique(key, return_counts=True)
+            dup = uniq[counts > 1]
+            rows = (np.flatnonzero(np.isin(key, dup))
+                    if len(dup) else np.empty(0, dtype=np.int64))
+        res = frozenset(rows.tolist())
+        with self._lock:
+            self._bind_data(data)
+            self._dup_rows[cache_key] = res
+        return res
+
     def _duplicate_dense(self, table: Table, item: str) -> List[Issue]:
         arr = table.columns[item].arr
         uniq, counts = np.unique(arr, return_counts=True)
@@ -358,13 +494,29 @@ class Checker:
 
     # -- links ----------------------------------------------------------------
     def parent_keyset(self, data: CifData, parent: Table,
-                      items: Tuple[str, ...]) -> Set[Tuple[str, ...]]:
-        key = (id(data), parent.name, items)
-        ks = self._keysets.get(key)
+                      items: Tuple[str, ...]):
+        key = (parent.name, items)
+        with self._lock:
+            self._bind_data(data)
+            ks = self._keysets.get(key)
         if ks is None:
-            cols = [parent.columns[i].values(0, parent.nrows) for i in items]
-            ks = set(zip(*cols))
-            self._keysets[key] = ks
+            if len(items) == 1:
+                col = parent.columns[items[0]]
+                if isinstance(col, CatColumn):
+                    ks = {(u,) for u in col.uniques}
+                elif isinstance(col, ListColumn):
+                    ks = {(v,) for v in col._values}
+                elif isinstance(col, DenseColumn) and col.arr.dtype.kind == "S":
+                    ks = _DenseKeySet(col.arr)
+                else:
+                    ks = {(v,) for v in col.values(0, parent.nrows)}
+            else:
+                cols = [parent.columns[i].values(0, parent.nrows)
+                        for i in items]
+                ks = set(zip(*cols))
+            with self._lock:
+                self._bind_data(data)
+                self._keysets[key] = ks
         return ks
 
     def check_links(self, data: CifData, table: Table) -> List[Issue]:
@@ -397,8 +549,6 @@ class Checker:
             return None
         key = _mixed_radix([codes[idx] for _, codes in facts],
                            [len(u) for u, _ in facts])
-        if key is None:
-            return None
         ukeys, first, counts = np.unique(key, return_index=True,
                                          return_counts=True)
         parent = data.get(link.parent)
@@ -414,9 +564,9 @@ class Checker:
                          link=link.id)
         if not all(p in parent.columns for p in pitems[:link.n_direct]):
             return None
-        bad_count, bad_vals, bad_keys = 0, [], []
-        keysets: Dict[Tuple[str, ...], Set] = {}
-        for k, f, n in zip(ukeys.tolist(), first.tolist(), counts.tolist()):
+        bad_count, bad_vals, bad_u_idx = 0, [], []
+        keysets: Dict[Tuple[str, ...], object] = {}
+        for u_i, (f, n) in enumerate(zip(first.tolist(), counts.tolist())):
             r = int(idx[f])
             vals = [table.columns[c].value(r) for c in citems]
             use = tuple(i for i, (c, v) in enumerate(zip(citems, vals))
@@ -427,18 +577,18 @@ class Checker:
                 keysets[sub_p] = self.parent_keyset(data, parent, sub_p)
             if tuple(vals[i] for i in use) not in keysets[sub_p]:
                 bad_count += n
-                bad_keys.append(k)
+                bad_u_idx.append(u_i)
                 if len(bad_vals) < MAX_EXAMPLES:
                     bad_vals.append(", ".join("%s=%s" % (citems[i], vals[i])
                                               for i in use))
         if not bad_count:
             return None
-        bad_mask = np.isin(key, np.asarray(bad_keys))
+        bad_mask = np.isin(key, ukeys[bad_u_idx])
         rows = idx[np.flatnonzero(bad_mask)[:MAX_EXAMPLES]]
         return Issue(ERROR, "broken_link", table.name,
                      "%d row(s) refer to %s rows that do not exist (%d "
                      "distinct value(s))" % (bad_count, link.parent,
-                                             len(bad_keys)),
+                                             len(bad_u_idx)),
                      items=list(citems), count=bad_count,
                      rows=rows.tolist(), values=bad_vals, link=link.id)
 
@@ -472,24 +622,25 @@ class Checker:
         return out
 
 
-def _combined_codes(table: Table, items: Sequence[str]
-                    ) -> Optional[np.ndarray]:
+def _combined_codes(table: Table, items: Sequence[str]) -> np.ndarray:
     facts = [table.columns[i].factorize() for i in items]
     return _mixed_radix([c for _, c in facts], [len(u) for u, _ in facts])
 
 
-def _mixed_radix(codes: List[np.ndarray], sizes: List[int]
-                 ) -> Optional[np.ndarray]:
-    """Combine several code arrays into one int64 key per row."""
+def _mixed_radix(codes: List[np.ndarray], sizes: List[int]) -> np.ndarray:
+    """Combine several code arrays into one comparable 1D key per row."""
+    if not codes or len(codes[0]) == 0:
+        return np.empty(0, dtype=np.int64)
     total = 1
     for s in sizes:
         total *= max(s, 1)
-    if total >= 2 ** 62:
-        return None
-    key = np.zeros(len(codes[0]) if codes else 0, dtype=np.int64)
-    for c, s in zip(codes, sizes):
-        key = key * max(s, 1) + c.astype(np.int64)
-    return key
+    if total < 2 ** 62:
+        key = np.zeros(len(codes[0]), dtype=np.int64)
+        for c, s in zip(codes, sizes):
+            key = key * max(s, 1) + c.astype(np.int64)
+        return key
+    mat = np.ascontiguousarray(np.column_stack(codes), dtype=np.int64)
+    return mat.view(np.dtype((np.void, mat.strides[0]))).ravel()
 
 
 def run_ihm_validator(path: str, fmt: str, gzipped: bool,

@@ -36,18 +36,25 @@ def cache_dir() -> str:
 
 def _download(name: str, dest: str) -> None:
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    part = dest + ".part"
+    part = "%s.%d.part" % (dest, os.getpid())
     req = urllib.request.Request(DICT_URL + name,
                                  headers={"User-Agent": "cif-explorer"})
-    with urllib.request.urlopen(req, timeout=60) as resp, \
-            open(part, "wb") as fh:
-        shutil.copyfileobj(resp, fh)
-    with open(part, "rb") as fh:
-        if _SENTINELS[name] not in fh.read():
-            os.unlink(part)
-            raise OSError("downloaded %s does not look like the dictionary"
-                          % name)
-    os.replace(part, dest)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp, \
+                open(part, "wb") as fh:
+            shutil.copyfileobj(resp, fh)
+        with open(part, "rb") as fh:
+            if _SENTINELS[name] not in fh.read():
+                raise OSError("downloaded %s does not look like the "
+                              "dictionary" % name)
+        os.replace(part, dest)
+    except BaseException:
+        if os.path.exists(part):
+            try:
+                os.unlink(part)
+            except OSError:
+                pass
+        raise
 
 
 def locate_dictionaries(update: bool = False) -> Tuple[List[str], List[str]]:
@@ -283,16 +290,29 @@ def build_links(pairs: Iterable[Tuple[str, str]],
 
     root_cache: Dict[str, frozenset] = {}
 
-    def roots(item: str, seen=()) -> frozenset:
+    def _roots(item: str, seen=()) -> Tuple[frozenset, bool]:
         if item in root_cache:
-            return root_cache[item]
+            return root_cache[item], False
+        if item in seen:
+            return frozenset([item]), True
         ps = parents_of.get(item)
-        if not ps or item in seen:
+        if not ps:
             r = frozenset([item])
-        else:
-            r = frozenset().union(*(roots(p, seen + (item,)) for p in ps))
-        root_cache[item] = r
-        return r
+            root_cache[item] = r
+            return r, False
+        parts = []
+        cycled = False
+        for p in ps:
+            pr, pc = _roots(p, seen + (item,))
+            parts.append(pr)
+            cycled = cycled or pc
+        r = frozenset().union(*parts)
+        if not cycled:
+            root_cache[item] = r
+        return r, cycled
+
+    def roots(item: str) -> frozenset:
+        return _roots(item)[0]
 
     links: List[Link] = []
     for (cc, pc), plist in sorted(groups.items()):

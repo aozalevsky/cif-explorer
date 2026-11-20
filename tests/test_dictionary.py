@@ -63,3 +63,21 @@ def test_build_links_simple_key():
     pairs = [("_a.x_id", "_x.id"), ("_a.y_id", "_x.id")]
     links = build_links(pairs, {"x": ["id"]})
     assert sorted(l.child_items for l in links) == [("x_id",), ("y_id",)]
+
+
+def test_build_links_cycle_does_not_poison_roots():
+    # a.x -> b.x -> a.x cycle plus b.x -> root.id; child.x -> a.x should still
+    # resolve root.id as a shared root when completing a composite key on p
+    pairs = [
+        ("_a.x", "_b.x"),
+        ("_b.x", "_a.x"),
+        ("_b.x", "_root.id"),
+        ("_p.k1", "_root.id"),
+        ("_child.k2", "_p.k2"),
+        ("_child.x", "_a.x"),
+    ]
+    links = build_links(pairs, {"p": ["k1", "k2"]})
+    to_p = [l for l in links if l.child == "child" and l.parent == "p"]
+    assert len(to_p) == 1
+    assert to_p[0].child_items == ("k2", "x")
+    assert to_p[0].parent_items == ("k2", "k1")

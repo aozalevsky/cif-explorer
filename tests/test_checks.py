@@ -105,3 +105,75 @@ def test_dense_columns(tmp_path, monkeypatch, mini_dic):
     assert got[("duplicate_key", "id")].rows == [4, 20]
     assert got[("bad_value", "cartn_x")].rows == [30, 40]
     assert got[("bad_value", "occupancy")].rows == [50]
+
+
+def test_dense_fast_path_edge_cases(tmp_path, monkeypatch, mini_dic):
+    # Ensure dense columns catch:
+    # - embedded newlines in 'code' (previously bypassed by '$' in _charset_lut)
+    # - leading '+' in PDBx 'float'
+    # - bad float past row 100,000 (previously truncated)
+    # - out-of-range value in a column that also contains an unparseable float
+    monkeypatch.setattr(store, "BATCH", 2000)
+    path = tmp_path / "edge.cif"
+    n = 102000
+    with open(path, "w") as fh:
+        fh.write("data_X\nloop_\n_atom_site.id\n_atom_site.Cartn_x\n"
+                 "_atom_site.occupancy\n")
+        for i in range(n):
+            if i == 10:
+                ident = "\n;a\nb\n;\n"
+            else:
+                ident = str(i + 1)
+            x = ("+1.5" if i == 20 else
+                 "1.2.3" if i == 101500 else "%.3f" % (i * 0.001))
+            occ = ("1.2.3" if i == 5 else
+                   "2.5" if i == 101000 else "%.6f" % ((i % 100000) * 1e-6))
+            fh.write("%s %s %s\n" % (ident, x, occ))
+    data = store.load(str(path))
+    t = data["atom_site"]
+    assert all(type(c).__name__ == "DenseColumn" for c in t.columns.values())
+    issues = Checker(mini_dic).check_table(t)
+    by = {(i.items[0], i.message.split(" (")[0]): i
+          for i in issues if i.kind == "bad_value"}
+    assert by[("id", "does not match type 'code'")].rows == [10]
+    assert by[("cartn_x", "does not match type 'float'")].rows == [20, 101500]
+    assert by[("occupancy", "does not match type 'float'")].rows == [5]
+    assert by[("occupancy", "out of allowed range")].rows == [101000]
+
+
+def test_dense_positive_int_and_mixed_radix_overflow(tmp_path):
+    import numpy as np
+    from cif_explorer.checks import _DenseKeySet, _mixed_radix
+    from cif_explorer.store import DenseColumn, Table
+
+    # Build a minimal dict with positive_int
+    dic_path = tmp_path / "p.dic"
+    dic_path.write_text(
+        "data_p\n_dictionary.title p\n_dictionary.version 1\n"
+        "save_t\n_category.id t\n_category.mandatory_code no\n"
+        "_category_key.name '_t.n'\nsave_\n"
+        "save__t.n\n_item.name '_t.n'\n_item.category_id t\n"
+        "_item.mandatory_code yes\n_item_type.code positive_int\nsave_\n"
+        "loop_\n_item_type_list.code\n_item_type_list.primitive_code\n"
+        "_item_type_list.construct\npositive_int numb '[1-9][0-9]*'\n"
+    )
+    from cif_explorer.dictionary import DictInfo
+    dic = DictInfo([str(dic_path)])
+    arr = np.array(["-5", "0", "+1", "01"] + [str(i) for i in range(1, 2000)],
+                   dtype="S")
+    t = Table("t", ["n"], [DenseColumn(arr)])
+    issues = Checker(dic).check_table(t)
+    bad = [i for i in issues if i.kind == "bad_value"]
+    assert len(bad) == 1 and bad[0].rows == [0, 1, 2, 3]
+
+    # _mixed_radix fallback when product of sizes >= 2**62
+    c0 = np.array([0, 1, 0, 2], dtype=np.int64)
+    c1 = np.array([5, 6, 5, 7], dtype=np.int64)
+    key = _mixed_radix([c0, c1], [1 << 40, 1 << 40])
+    uniq, counts = np.unique(key, return_counts=True)
+    assert len(uniq) == 3 and sorted(counts.tolist()) == [1, 1, 2]
+
+    # _DenseKeySet membership including longer-than-itemsize & non-ASCII keys
+    ks = _DenseKeySet(np.array(["1", "22", "333"], dtype="S"))
+    assert ("1",) in ks and ("333",) in ks
+    assert ("3334",) not in ks and ("café",) not in ks and ("2",) not in ks
