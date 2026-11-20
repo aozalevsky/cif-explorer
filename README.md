@@ -32,9 +32,16 @@ cif_explorer 9A1N.cif          # opens http://localhost:<port>/ in the browser
   and the previous version stays on screen.
 - **Big files.** Reading is done by python-ihm's C tokenizer. Large tables
   (`atom_site`, `ihm_starting_model_coord`, `ihm_sphere_obj_site`, …) are packed
-  into numpy arrays while reading: a 143 MB entry with 1.9 M atoms needs about
-  100 MB of memory and loads in under 10 s. Paging, filtering and link lookups
-  work on the packed columns.
+  into numpy arrays while reading, so memory stays below the file size.
+  Paging, filtering, link lookups and child counts work on the packed columns
+  and answer in tens of milliseconds even for millions of atoms.
+
+  | file | atoms | load | checks | stored | peak RSS |
+  | --- | --- | --- | --- | --- | --- |
+  | 9A1N, 143 MB | 1.9 M | 7.6 s | 5 s | 97 MB | 0.27 GB |
+  | synthetic, 680 MB | 9.5 M | 35 s | 9 s | 432 MB | 1.0 GB |
+
+  The browser opens immediately and shows a progress bar while loading.
 - Reads `.cif`, `.cif.gz` and BinaryCIF (`.bcif`).
 
 ## Install
@@ -68,6 +75,16 @@ In the browser:
 | dictionary definition | hover a column header or field name |
 | jump from the tree to the table | `⌖ table` on a node |
 | re-root the tree | `⤒ root` on a node |
+
+## Limitations / ideas
+
+- Rows are matched to parents by exact value equality, as the dictionary
+  links define. Range-style references (`seq_id_begin`..`seq_id_end`) are
+  matched on their end points only; "which spheres cover residue 17" is not
+  answered yet.
+- Line numbers are known per category (python-ihm reports them), not per
+  row.
+- Only the first data block of a file is shown.
 
 ## Development
 

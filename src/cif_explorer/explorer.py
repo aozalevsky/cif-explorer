@@ -12,7 +12,7 @@ import json
 import os
 import re
 import queue
-import textwrap
+from collections import Counter
 import threading
 import time
 import traceback
@@ -82,9 +82,14 @@ def _clean_text(s: Optional[str]) -> str:
     if not s:
         return ""
     lines = s.strip("\n").splitlines()
-    first = lines[0].strip()
-    rest = textwrap.dedent("\n".join(lines[1:]))
-    text = first + ("\n" + rest if rest.strip() else "")
+    # strip the indentation shared by most lines (the dictionaries indent
+    # prose by ~15 columns but the first line and odd lines differ)
+    indents = Counter(len(ln) - len(ln.lstrip(" ")) for ln in lines[1:]
+                      if ln.strip())
+    base = indents.most_common(1)[0][0] if indents else 0
+    rest = [ln[base:] if ln[:base].isspace() else ln.lstrip()
+            for ln in lines[1:]]
+    text = "\n".join([lines[0].strip()] + rest)
     out, cur = [], []
     for line in text.splitlines():
         if not line.strip():

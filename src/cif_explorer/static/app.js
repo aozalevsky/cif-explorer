@@ -848,8 +848,18 @@ async function showTip(el) {
     const vals = info.enum.slice(0, 20).map(e => e.value).join(' | ');
     kids.push(h('div', { class: 'tt-enum' }, 'allowed: ' + vals + (info.enum_total > 20 ? ` … (${info.enum_total})` : '')));
   }
-  if ((info.parents || []).length) kids.push(h('div', { class: 'tt-meta' }, '↑ refers to: ' + info.parents.join(', ')));
-  if ((info.children || []).length) kids.push(h('div', { class: 'tt-meta' }, '↓ referenced by: ' + info.children.join(', ')));
+  const list = (xs, present) => {
+    // categories in this file first, then the rest, capped
+    const inFile = new Set((state.summary ? state.summary.categories : []).map(c => c.name));
+    const sorted = [...xs].sort((a, b) => (inFile.has(b) - inFile.has(a)) || a.localeCompare(b));
+    const shown = sorted.slice(0, 10).map(c => (inFile.has(c) ? c : c + '°'));
+    return shown.join(', ') + (sorted.length > 10 ? ` … (+${sorted.length - 10})` : '');
+  };
+  if ((info.parents || []).length) kids.push(h('div', { class: 'tt-meta' }, '↑ refers to: ' + list(info.parents)));
+  if ((info.children || []).length) kids.push(h('div', { class: 'tt-meta' }, '↓ referenced by: ' + list(info.children)));
+  if ([...(info.parents || []), ...(info.children || [])].some(c => !(state.summary.categories.some(x => x.name === c)))) {
+    kids.push(h('div', { class: 'tt-meta small' }, '° not in this file'));
+  }
   tip.replaceChildren(...kids);
   tip.classList.remove('hidden');
   const r = el.getBoundingClientRect();
